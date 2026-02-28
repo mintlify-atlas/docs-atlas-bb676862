@@ -1,0 +1,115 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Kass",
+  "projectDescription": "A Swift library for reverse-engineering and security research on macOS through XNU kernel interaction.",
+  "theme": "aspen",
+  "primaryColor": "#E74C3C",
+  "lightColor": "#3498DB",
+  "darkColor": "#2C3E50",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/mach-fundamentals",
+              "concepts/bsd-layer",
+              "concepts/kernel-interaction"
+            ]
+          },
+          {
+            "group": "Modules",
+            "pages": [
+              "modules/overview",
+              "modules/machcore",
+              "modules/bsdcore",
+              "modules/linking",
+              "modules/shellcode",
+              "modules/oscore"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced/security-considerations",
+              "advanced/debugging",
+              "advanced/best-practices"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/examples",
+              "resources/migration",
+              "resources/contributing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "MachCore",
+            "pages": [
+              "api/machcore/ports",
+              "api/machcore/tasks",
+              "api/machcore/threads",
+              "api/machcore/messaging",
+              "api/machcore/host",
+              "api/machcore/exceptions",
+              "api/machcore/virtual-memory",
+              "api/machcore/synchronization"
+            ]
+          },
+          {
+            "group": "BSDCore",
+            "pages": [
+              "api/bsdcore/filesystem",
+              "api/bsdcore/processes",
+              "api/bsdcore/syscalls",
+              "api/bsdcore/code-signing",
+              "api/bsdcore/kqueue"
+            ]
+          },
+          {
+            "group": "Other Modules",
+            "pages": [
+              "api/linking",
+              "api/shellcode",
+              "api/oscore"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Mach kernel API wrappers for ports, tasks, threads, and messaging",
+    "BSD layer interfaces for filesystem operations and process management",
+    "Dynamic library and symbol linking utilities",
+    "Shellcode generation and task injection capabilities",
+    "Type-safe Swift interfaces for low-level XNU kernel interactions"
+  ],
+  "publicApiSurface": [
+    "Mach.Task",
+    "Mach.Thread",
+    "Mach.Port",
+    "Mach.Host",
+    "BSD.ProcInfo",
+    "BSD.FileSystem",
+    "Library.get(symbol:)",
+    "Shellcode.TaskInjection"
+  ]
+}
