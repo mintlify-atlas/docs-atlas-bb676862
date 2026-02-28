@@ -1,0 +1,94 @@
+---
+title: Introduction to Kass
+description: A Swift library for reverse-engineering and security research on macOS through XNU kernel interaction
+---
+
+# Introduction to Kass
+
+Kass is a collection of modules for reverse-engineering and security research on macOS, written in Swift. It provides a comprehensive Swift-native interface for interacting with the XNU kernel that underlies macOS.
+
+<Note>
+  While Kass may compile on older versions of macOS, it is only thoroughly tested on the latest version. The library is primarily designed for reverse-engineering and security research, not production applications.
+</Note>
+
+## Core modules
+
+<CardGroup cols={2}>
+  <Card title="MachCore" icon="gear" href="#machcore">
+    Interface for the Mach portion of the XNU kernel. The most stable and complete module.
+  </Card>
+  <Card title="BSDCore" icon="terminal" href="#bsdcore">
+    Interface for the BSD portion of the XNU kernel. Work in progress.
+  </Card>
+  <Card title="Linking" icon="link" href="#linking">
+    Simple API for symbol access using dlopen/dlsym functions.
+  </Card>
+  <Card title="OSCore" icon="apple" href="#oscore">
+    macOS-specific features including IOKit and notification APIs.
+  </Card>
+</CardGroup>
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Add Kass to your Swift package and start building
+  </Card>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Get up and running with your first Kass example
+  </Card>
+</CardGroup>
+
+## MachCore
+
+The MachCore module provides facilities for interacting with the Mach portion of the XNU kernel. This is the most mature module in Kass and should be considered the most stable.
+
+**Key features:**
+- Task management and inspection
+- Thread control and state manipulation
+- Port rights and IPC messaging
+- Virtual memory operations
+- Host information queries
+- Processor and processor set management
+
+## BSDCore
+
+The BSDCore module provides facilities for interacting with the BSD portion of the XNU kernel. This module is actively being developed and may be subject to changes.
+
+<Warning>
+  BSDCore is a work-in-progress and should not be considered stable. API changes may occur in future versions.
+</Warning>
+
+## Linking
+
+The Linking module provides a simple API to access symbols using the `dlopen` and `dlsym` functions internally. This module will likely be folded into BSDCore in a future release.
+
+## OSCore
+
+The OSCore module provides macOS-specific features and integrations including:
+- IOKit device interaction
+- System notification APIs
+- OS variant detection
+
+## Platform support
+
+Kass supports the following platforms:
+- **macOS**: 10.13 and later
+- **iOS**: 12.0 and later (experimental)
+
+<Tip>
+  The library is primarily tested and designed for macOS. iOS support is experimental and may have limitations.
+</Tip>
+
+## Use cases
+
+Kass is designed for:
+- Security research and auditing
+- Reverse engineering tasks
+- Low-level system introspection
+- Kernel interface experimentation
+- Educational purposes
+
+## License
+
+Most of Kass is MIT-licensed. However, some portions include code from header files licensed under Apple's Public Source License and other licenses. Copyright notices are included where appropriate in the source code.

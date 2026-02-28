@@ -1,0 +1,284 @@
+---
+title: Migration Guide
+description: Guide for migrating between major versions of Kass and understanding breaking changes
+---
+
+This guide helps you migrate your code between major versions of Kass, with special focus on the architectural changes introduced in versions 3.0.0 and 4.0.0.
+
+## Understanding Kass Versioning
+
+Kass follows [Semantic Versioning](https://semver.org/) starting from version 3.0.0, though the developer notes that full commitment to strict SemVer may vary as the project evolves.
+
+<Note>
+From the developer: "I honestly don't know how many (if anyone) is using this project, but I wanted 3.0 onward to be at least somewhat stable."
+</Note>
+
+## Module Stability Matrix
+
+As of Kass 4.0.0, here's the stability level of each module:
+
+<AccordionGroup>
+  <Accordion title="MachCore - Mostly Stable">
+    The `MachCore` module is considered the most mature and stable part of Kass.
+    
+    **Stability:** High  
+    **Expected Changes:** Minimal, primarily additions of virtual memory APIs
+    
+    ```swift Package.swift
+    .product(name: "MachCore", package: "Kass")
+    ```
+    
+    This module should be safe to use in projects that need long-term stability.
+  </Accordion>
+
+  <Accordion title="BSDCore - Early Stages">
+    The `BSDCore` module is still in early development and subject to significant changes.
+    
+    **Stability:** Low  
+    **Expected Changes:** Frequent API changes and additions
+    
+    ```swift Package.swift
+    .product(name: "BSDCore", package: "Kass")
+    ```
+    
+    Expect breaking changes in minor versions until the API stabilizes.
+  </Accordion>
+
+  <Accordion title="Linking - May Be Folded">
+    The `Linking` module provides dynamic symbol resolution but may be merged into `BSDCore` in the future.
+    
+    **Stability:** Medium  
+    **Expected Changes:** Likely to be folded into BSDCore
+    
+    ```swift Package.swift
+    .product(name: "Linking", package: "Kass")
+    ```
+    
+    Plan for potential reorganization of this module's contents.
+  </Accordion>
+</AccordionGroup>
+
+## Migrating to Kass 4.0.0
+
+### What Changed
+
+Kass 4.0.0 represents a major version bump with continued architectural refinement. The developer notes:
+
+> "As of writing, Kass 4.0.0 has been released. Everything I have said above still stands. I will try to stick with SemVer, but I can't promise anything. There's still some API's I'd love to add more stability to, and more I'd like to add."
+
+### Key Updates
+
+<Steps>
+  <Step title="Review your module dependencies">
+    Check which modules you're using and assess their stability:
+    
+    ```swift Before
+    // If you were using all modules
+    dependencies: [
+        .product(name: "Kass", package: "Kass")
+    ]
+    ```
+    
+    ```swift After - Explicit
+    // Consider being explicit about module usage
+    dependencies: [
+        .product(name: "MachCore", package: "Kass"),  // Stable
+        .product(name: "Linking", package: "Kass")    // If needed
+    ]
+    ```
+  </Step>
+
+  <Step title="Update version specification">
+    Update your `Package.swift` to target 4.0.0:
+    
+    ```swift Package.swift
+    dependencies: [
+        .package(
+            url: "https://github.com/nmggithub/Kass",
+            exact: "4.0.0"  // Use exact version for stability
+        )
+    ]
+    ```
+    
+    <Note>
+    Consider using `exact:` version specification for major versions to avoid unexpected breaking changes.
+    </Note>
+  </Step>
+
+  <Step title="Test your code">
+    Run your test suite to identify any breaking changes:
+    
+    ```bash
+    swift build
+    swift test
+    ```
+  </Step>
+</Steps>
+
+## Migrating to Kass 3.0.0
+
+### Major Architectural Changes
+
+Kass 3.0.0 was a major upgrade from 2.0.0 with significant architectural improvements:
+
+<Note>
+From the developer: "Kass 3.0.0 was a major upgrade from Kass 2.0.0, hence the major version change. But even now, it's still a library in transition. Hopefully not in the architecture department, but Kass 3.0.0 was still missing several features I wish I could have included."
+</Note>
+
+### Module Organization
+
+Kass 3.0.0 introduced the current module structure:
+
+```swift Module Structure
+// Main namespace module
+import Kass  // Provides access to MachCore and BSDCore
+
+// Individual modules
+import MachCore  // Mach kernel APIs
+import BSDCore   // BSD kernel APIs  
+import Linking   // Dynamic linking
+```
+
+### Import Statement Changes
+
+<CodeGroup>
+```swift Kass 2.x
+// Old style (hypothetical)
+import Kass
+
+// Everything in one namespace
+let task = Task.current
+```
+
+```swift Kass 3.x+
+// New modular approach
+import MachCore
+
+// Namespaced under Mach
+let task = Mach.Task.current
+```
+</CodeGroup>
+
+## Handling Deprecated APIs
+
+### Port Destruction
+
+Some unsafe APIs have been deprecated since macOS 12.0:
+
+```swift Deprecated
+import MachCore
+
+let port = try Mach.Port.allocate(inTask: .current, right: .receive)
+
+// ⚠️ Deprecated: Inherently unsafe
+try port.destroy()
+```
+
+```swift Recommended
+import MachCore
+
+let port = try Mach.Port.allocate(inTask: .current, right: .receive)
+
+// ✅ Use safer alternatives
+try port.destruct(
+    guard: guardContext,
+    sendRightDelta: 0
+)
+// Or use deallocate() or userRefs(for:)
+```
+
+### Virtual Memory Wiring
+
+```swift Deprecated (macOS 14.5+)
+import MachCore
+
+let vm = Mach.Task.current.vm
+
+// ⚠️ Deprecated API
+try vm.wire(mustWire: true)
+```
+
+## Compatibility Considerations
+
+### macOS Version Support
+
+Kass is primarily tested on the latest macOS version. While it may compile on older versions:
+
+<Warning>
+"Note that while it may compile on older versions of macOS, this library is only thoroughly tested on the latest version of macOS. In some cases, older deprecated (or even obsoleted) API's are included, but they should be assumed to be untested as it stands today."
+</Warning>
+
+### Platform Support
+
+```swift Package.swift
+platforms: [
+    .macOS(.v10_13),  // Minimum version
+    .iOS(.v12),
+]
+```
+
+Kass currently focuses on macOS but includes minimum iOS version specifications for XNU-based systems.
+
+## Handling Module Naming Collisions
+
+If Kass module names collide with your existing dependencies:
+
+```swift Package.swift
+let package = Package(
+    name: "MyProject",
+    dependencies: [
+        .package(
+            url: "https://github.com/nmggithub/Kass",
+            exact: "4.0.0"
+        )
+    ],
+    targets: [
+        .target(
+            name: "MyTarget",
+            dependencies: [
+                .product(name: "MachCore", package: "Kass")
+            ],
+            moduleAliases: [
+                "MachCore": "KassMachCore"  // Resolve collision
+            ]
+        )
+    ]
+)
+```
+
+Then import with the alias:
+
+```swift
+import KassMachCore
+
+let task = Mach.Task.current
+```
+
+## Future Migration Planning
+
+<Steps>
+  <Step title="Monitor the Linking module">
+    The `Linking` module will likely be folded into `BSDCore` in a future version. Keep an eye on release notes for this change.
+  </Step>
+  
+  <Step title="Watch for BSDCore stabilization">
+    `BSDCore` is still evolving. Major API changes may occur before it reaches stability.
+  </Step>
+  
+  <Step title="Stay informed">
+    Follow the [GitHub repository](https://github.com/nmggithub/Kass) for updates and breaking change announcements.
+  </Step>
+</Steps>
+
+## Getting Help
+
+If you encounter issues during migration:
+
+<CardGroup cols={2}>
+  <Card title="File an Issue" icon="github" href="https://github.com/nmggithub/Kass/issues">
+    Report migration problems or ask questions
+  </Card>
+  <Card title="Examples" icon="code" href="/resources/examples">
+    See updated usage examples for the latest version
+  </Card>
+</CardGroup>

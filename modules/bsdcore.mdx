@@ -1,0 +1,613 @@
+---
+title: 'BSDCore Module'
+description: 'Interface to the BSD subsystem of XNU kernel'
+---
+
+## Overview
+
+BSDCore provides Swift wrappers for the BSD portion of the XNU kernel. This module is a work-in-progress and includes system call wrappers, file system operations, process management, and POSIX spawn utilities.
+
+<Warning>
+BSDCore is in early development and should not be considered stable. API changes are expected in future versions.
+</Warning>
+
+<Note>
+**Source Location**: `Sources/BSD/Core/`
+
+**Dependencies**: KassHelpers, KassC, Linking, MachCore
+</Note>
+
+## Core Components
+
+### BSD Namespace
+
+The main entry point for BSD operations:
+
+```swift BSD.swift:6-29
+public struct BSD: KassHelpers.Namespace {
+    /// Executes a function that returns a POSIX error code and throws if it fails.
+    @discardableResult
+    public static func call<ReturnType: BinaryInteger>(
+        _ call: @autoclosure () throws -> ReturnType,
+        returnsErrno: Bool = false
+    ) throws -> ReturnType {
+        errno = 0
+        let ret = try call()
+        guard returnsErrno ? ret == 0 : (ret != -1) else {
+            let currentErrno = returnsErrno ? Int32(ret) : errno
+            if currentErrno == 0 { return ret }
+            guard let posixCode = POSIXError.Code(rawValue: currentErrno) else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(currentErrno))
+            }
+            throw POSIXError(posixCode)
+        }
+        return ret
+    }
+}
+```
+
+## System Calls
+
+### Direct Syscall Interface
+
+Make raw system calls with type-safe arguments:
+
+<Tabs>
+  <Tab title="Basic Usage">
+```swift Syscall.swift:10-56
+// Simple syscall with no arguments
+let result = try BSD.syscall(SYS_getpid)
+
+// Syscall with arguments
+let fd = try BSD.syscall(
+    SYS_open,
+    "/tmp/test.txt",
+    O_RDONLY
+)
+
+// Syscall with up to 8 arguments
+let ret = try BSD.syscall(
+    SYS_some_syscall,
+    arg1, arg2, arg3, arg4,
+    arg5, arg6, arg7, arg8
+)
+```
+  </Tab>
+  
+  <Tab title="Argument Types">
+```swift Syscall.swift:58-130
+// Supported argument types:
+
+// Binary integers
+try BSD.syscall(SYS_exit, Int32(0))
+
+// Pointers
+var buffer = [UInt8](repeating: 0, count: 1024)
+try buffer.withUnsafeMutableBytes { ptr in
+    try BSD.syscall(SYS_read, fd, ptr.baseAddress, buffer.count)
+}
+
+// Strings (automatically converted to C strings)
+try BSD.syscall(SYS_open, "/path/to/file", O_RDONLY)
+
+// Boolean (converted to 0/1)
+try BSD.syscall(SYS_some_call, true)
+
+// Data objects
+let data = Data([0x01, 0x02, 0x03])
+try BSD.syscall(SYS_write, fd, data, data.count)
+
+// Arrays
+let args = ["arg1", "arg2", "arg3"]
+try BSD.syscall(SYS_execve, "/bin/ls", args, [])
+```
+  </Tab>
+</Tabs>
+
+### BSDSyscallArgument Protocol
+
+```swift Syscall.swift:5-8
+public protocol BSDSyscallArgument {
+    func toSyscallArg() -> syscall_arg_t
+}
+
+// Conform your own types:
+extension MyCustomType: BSD.BSDSyscallArgument {
+    public func toSyscallArg() -> syscall_arg_t {
+        // Convert to syscall_arg_t
+        return syscall_arg_t(self.rawValue)
+    }
+}
+```
+
+## File System Operations
+
+BSDCore provides utilities for file system interaction:
+
+<CodeGroup>
+```swift File Descriptors
+import BSDCore
+
+// Open file
+let fd = try BSD.call(open("/tmp/test.txt", O_RDWR | O_CREAT, 0o644))
+defer { close(fd) }
+
+// Read from file
+var buffer = [UInt8](repeating: 0, count: 1024)
+let bytesRead = try BSD.call(
+    read(fd, &buffer, buffer.count)
+)
+
+// Write to file
+let data = "Hello, World!".data(using: .utf8)!
+let bytesWritten = try data.withUnsafeBytes { ptr in
+    try BSD.call(write(fd, ptr.baseAddress, data.count))
+}
+
+// File information
+var stat = stat()
+try BSD.call(fstat(fd, &stat))
+print("File size: \(stat.st_size)")
+```
+
+```swift Directory Operations
+// Create directory
+try BSD.call(mkdir("/tmp/testdir", 0o755))
+
+// Change directory
+try BSD.call(chdir("/tmp/testdir"))
+
+// Get current directory
+var buffer = [CChar](repeating: 0, count: 1024)
+let path = try BSD.call(getcwd(&buffer, buffer.count))
+if let pathString = String(cString: path, encoding: .utf8) {
+    print("Current directory: \(pathString)")
+}
+
+// Remove directory
+try BSD.call(rmdir("/tmp/testdir"))
+```
+
+```swift File Attributes
+// Change permissions
+try BSD.call(chmod("/tmp/test.txt", 0o644))
+
+// Change ownership
+try BSD.call(chown("/tmp/test.txt", 501, 20))
+
+// Get file info
+var stat = stat()
+try BSD.call(stat("/tmp/test.txt", &stat))
+print("Permissions: \(String(stat.st_mode, radix: 8))")
+print("UID: \(stat.st_uid), GID: \(stat.st_gid)")
+```
+</CodeGroup>
+
+## Process Management
+
+### Process Information
+
+```swift
+import BSDCore
+import MachCore
+
+// Get current process ID
+let pid = getpid()
+
+// Get parent process ID
+let ppid = getppid()
+
+// Get process group ID
+let pgid = getpgrp()
+
+// Get session ID
+let sid = getsid(0)
+
+// Get process priority
+let priority = try BSD.call(getpriority(PRIO_PROCESS, 0))
+
+// Set process priority
+try BSD.call(setpriority(PRIO_PROCESS, 0, 10))
+```
+
+### Process Control
+
+```swift
+// Fork process
+let childPID = try BSD.call(fork())
+if childPID == 0 {
+    // Child process
+    print("I am the child")
+    exit(0)
+} else {
+    // Parent process
+    print("Child PID: \(childPID)")
+    
+    // Wait for child
+    var status: Int32 = 0
+    try BSD.call(waitpid(childPID, &status, 0))
+}
+```
+
+## POSIX Spawn
+
+BSDCore includes wrappers for posix_spawn:
+
+<Tabs>
+  <Tab title="Basic Spawn">
+```swift
+import BSDCore
+
+// Simple process spawn
+var pid: pid_t = 0
+var args = [
+    "/bin/ls",
+    "-la",
+    "/tmp",
+    nil
+].map { $0.flatMap { strdup($0) } }
+defer { args.forEach { $0.map(free) } }
+
+var env = [
+    "PATH=/usr/bin:/bin",
+    nil
+].map { $0.flatMap { strdup($0) } }
+defer { env.forEach { $0.map(free) } }
+
+try BSD.call(
+    posix_spawn(
+        &pid,
+        "/bin/ls",
+        nil,
+        nil,
+        &args,
+        &env
+    ),
+    returnsErrno: true
+)
+
+print("Spawned process: \(pid)")
+```
+  </Tab>
+  
+  <Tab title="With File Actions">
+```swift
+// Spawn with file actions
+var fileActions: posix_spawn_file_actions_t? = nil
+posix_spawn_file_actions_init(&fileActions)
+defer { posix_spawn_file_actions_destroy(&fileActions) }
+
+// Redirect stdout to file
+posix_spawn_file_actions_addopen(
+    &fileActions,
+    STDOUT_FILENO,
+    "/tmp/output.txt",
+    O_WRONLY | O_CREAT | O_TRUNC,
+    0o644
+)
+
+var pid: pid_t = 0
+var args = ["/usr/bin/date", nil].map { $0.flatMap { strdup($0) } }
+defer { args.forEach { $0.map(free) } }
+
+try BSD.call(
+    posix_spawn(
+        &pid,
+        "/usr/bin/date",
+        &fileActions,
+        nil,
+        &args,
+        nil
+    ),
+    returnsErrno: true
+)
+```
+  </Tab>
+  
+  <Tab title="With Attributes">
+```swift
+// Spawn with attributes
+var spawnAttrs: posix_spawnattr_t? = nil
+posix_spawnattr_init(&spawnAttrs)
+defer { posix_spawnattr_destroy(&spawnAttrs) }
+
+// Set process flags
+var flags: Int16 = 0
+flags |= Int16(POSIX_SPAWN_START_SUSPENDED)
+posix_spawnattr_setflags(&spawnAttrs, flags)
+
+// Set signal mask
+var sigmask = sigset_t()
+sigemptyset(&sigmask)
+sigaddset(&sigmask, SIGCHLD)
+posix_spawnattr_setsigmask(&spawnAttrs, &sigmask)
+
+var pid: pid_t = 0
+var args = ["/bin/sleep", "60", nil].map { $0.flatMap { strdup($0) } }
+defer { args.forEach { $0.map(free) } }
+
+try BSD.call(
+    posix_spawn(
+        &pid,
+        "/bin/sleep",
+        nil,
+        &spawnAttrs,
+        &args,
+        nil
+    ),
+    returnsErrno: true
+)
+
+// Process starts suspended
+print("Spawned suspended process: \(pid)")
+
+// Resume it
+kill(pid, SIGCONT)
+```
+  </Tab>
+</Tabs>
+
+## KQueue Event System
+
+Monitor file system and process events:
+
+```swift
+import BSDCore
+
+// Create kqueue
+let kq = try BSD.call(kqueue())
+defer { close(kq) }
+
+// Watch for file changes
+let fd = try BSD.call(open("/tmp/watched.txt", O_RDONLY))
+defer { close(fd) }
+
+var change = kevent()
+change.ident = UInt(fd)
+change.filter = Int16(EVFILT_VNODE)
+change.flags = UInt16(EV_ADD | EV_ENABLE | EV_CLEAR)
+change.fflags = UInt32(
+    NOTE_DELETE | NOTE_WRITE | NOTE_EXTEND |
+    NOTE_ATTRIB | NOTE_RENAME
+)
+
+// Register event
+try BSD.call(kevent(kq, &change, 1, nil, 0, nil))
+
+// Wait for events
+var event = kevent()
+let n = try BSD.call(kevent(kq, nil, 0, &event, 1, nil))
+
+if n > 0 {
+    if event.fflags & UInt32(NOTE_DELETE) != 0 {
+        print("File was deleted")
+    }
+    if event.fflags & UInt32(NOTE_WRITE) != 0 {
+        print("File was written to")
+    }
+}
+```
+
+## Resource Limits
+
+Manage process resource limits:
+
+```swift
+import BSDCore
+
+// Get current limits
+var limits = rlimit()
+try BSD.call(getrlimit(RLIMIT_NOFILE, &limits))
+print("Max open files: \(limits.rlim_cur) / \(limits.rlim_max)")
+
+// Set soft limit
+limits.rlim_cur = 4096
+try BSD.call(setrlimit(RLIMIT_NOFILE, &limits))
+
+// Available resource types:
+// - RLIMIT_CPU: CPU time
+// - RLIMIT_FSIZE: File size
+// - RLIMIT_DATA: Data segment size
+// - RLIMIT_STACK: Stack size
+// - RLIMIT_CORE: Core file size
+// - RLIMIT_RSS: Resident set size
+// - RLIMIT_MEMLOCK: Locked memory
+// - RLIMIT_NPROC: Number of processes
+// - RLIMIT_NOFILE: Open files
+```
+
+## Integration with MachCore
+
+BSDCore and MachCore work together:
+
+<CodeGroup>
+```swift PID to Task
+import BSDCore
+import MachCore
+
+// Get Mach task from BSD process ID
+let pid = getpid()
+let task = try Mach.Task.forPID(pid)
+
+// Get BSD process ID from Mach task
+let taskPID = try task.pid
+```
+
+```swift File Descriptor to Port
+// Create port from file descriptor
+let fd = try BSD.call(open("/tmp/test.txt", O_RDONLY))
+
+// Use with Mach operations
+let task = Mach.Task.current
+let vm = task.vm
+
+// Map file into memory
+var mappedPtr: UnsafeRawPointer? = nil
+var stat = stat()
+try BSD.call(fstat(fd, &stat))
+
+// Create memory entry from file
+var size = vm_size_t(stat.st_size)
+let entry = try Mach.MemoryEntry(
+    task: task,
+    pointer: nil,
+    size: &size,
+    protection: [.read]
+)
+```
+</CodeGroup>
+
+## Error Handling
+
+BSDCore uses `POSIXError` for all BSD errors:
+
+```swift
+do {
+    try BSD.call(some_posix_function())
+} catch POSIXError.EACCES {
+    print("Permission denied")
+} catch POSIXError.ENOENT {
+    print("File not found")
+} catch let error as POSIXError {
+    print("POSIX error: \(error.code)")
+}
+```
+
+## Common Use Cases
+
+<AccordionGroup>
+  <Accordion title="Process Monitoring">
+```swift
+import BSDCore
+import MachCore
+
+// Monitor process lifecycle
+let kq = try BSD.call(kqueue())
+defer { close(kq) }
+
+let targetPID = 1234
+var change = kevent()
+change.ident = UInt(targetPID)
+change.filter = Int16(EVFILT_PROC)
+change.flags = UInt16(EV_ADD | EV_ENABLE)
+change.fflags = UInt32(NOTE_EXIT | NOTE_FORK | NOTE_EXEC)
+
+try BSD.call(kevent(kq, &change, 1, nil, 0, nil))
+
+// Wait for process events
+while true {
+    var event = kevent()
+    let n = try BSD.call(kevent(kq, nil, 0, &event, 1, nil))
+    
+    if n > 0 {
+        if event.fflags & UInt32(NOTE_EXIT) != 0 {
+            print("Process \(event.ident) exited")
+            break
+        }
+        if event.fflags & UInt32(NOTE_FORK) != 0 {
+            print("Process \(event.ident) forked")
+        }
+        if event.fflags & UInt32(NOTE_EXEC) != 0 {
+            print("Process \(event.ident) exec'd")
+        }
+    }
+}
+```
+  </Accordion>
+  
+  <Accordion title="Secure Process Spawning">
+```swift
+import BSDCore
+
+func spawnSecureProcess(
+    executable: String,
+    arguments: [String],
+    environment: [String: String]
+) throws -> pid_t {
+    // Set up file actions
+    var fileActions: posix_spawn_file_actions_t? = nil
+    posix_spawn_file_actions_init(&fileActions)
+    defer { posix_spawn_file_actions_destroy(&fileActions) }
+    
+    // Close all file descriptors except 0, 1, 2
+    for fd in 3..<1024 {
+        posix_spawn_file_actions_addclose(&fileActions, Int32(fd))
+    }
+    
+    // Set up spawn attributes
+    var spawnAttrs: posix_spawnattr_t? = nil
+    posix_spawnattr_init(&spawnAttrs)
+    defer { posix_spawnattr_destroy(&spawnAttrs) }
+    
+    // Reset all signals
+    var sigmask = sigset_t()
+    sigemptyset(&sigmask)
+    posix_spawnattr_setsigmask(&spawnAttrs, &sigmask)
+    
+    // Prepare arguments
+    var cArgs = ([executable] + arguments).map { strdup($0) } + [nil]
+    defer { cArgs.forEach { $0.map(free) } }
+    
+    // Prepare environment
+    var cEnv = environment.map { "\($0.key)=\($0.value)" }.map { strdup($0) } + [nil]
+    defer { cEnv.forEach { $0.map(free) } }
+    
+    // Spawn process
+    var pid: pid_t = 0
+    try BSD.call(
+        posix_spawn(
+            &pid,
+            executable,
+            &fileActions,
+            &spawnAttrs,
+            &cArgs,
+            &cEnv
+        ),
+        returnsErrno: true
+    )
+    
+    return pid
+}
+
+let pid = try spawnSecureProcess(
+    executable: "/usr/bin/env",
+    arguments: ["python3", "-c", "print('Hello')"],
+    environment: ["PATH": "/usr/bin:/bin"]
+)
+print("Spawned secure process: \(pid)")
+```
+  </Accordion>
+</AccordionGroup>
+
+## Limitations
+
+<Warning>
+- BSDCore is a work-in-progress
+- Not all BSD syscalls are wrapped
+- API may change in future versions
+- Some features require elevated privileges
+- Limited testing on older macOS versions
+</Warning>
+
+## Future Development
+
+Planned features for BSDCore:
+
+- More comprehensive file system wrappers
+- Network socket abstractions
+- Signal handling utilities
+- Process credential management
+- Audit subsystem access
+- Extended attribute support
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MachCore Module" icon="gear" href="/modules/machcore">
+    Explore Mach kernel features
+  </Card>
+  
+  <Card title="Linking Module" icon="link" href="/modules/linking">
+    Learn about dynamic library loading
+  </Card>
+</CardGroup>

@@ -1,0 +1,494 @@
+---
+title: 'OSCore Module'
+description: 'Low-level Darwin OS features and utilities'
+---
+
+The OSCore module provides Swift wrappers for low-level Darwin operating system features including notifications, IOKit, OS variants, and once-execution primitives.
+
+## OS Namespace
+
+All OSCore APIs are contained within the `OS` namespace:
+
+```swift
+public class OS: KassHelpers.Namespace {}
+```
+
+---
+
+## Notify
+
+A Swift wrapper around the Darwin notification system (libnotify).
+
+### NotificationName
+
+A helper for working with notification names.
+
+```swift
+public struct NotificationName {
+    public let name: String
+    public init(_ name: String)
+}
+```
+
+#### Methods
+
+<ParamField path="post()" type="() throws -> Void">
+  Posts a notification for this name
+</ParamField>
+
+<ParamField path="register(handler:onQueue:)" type="(@escaping notify_handler_t, DispatchQueue) throws -> NotificationToken">
+  Registers a notification handler to be called on a dispatch queue
+  
+  **Parameters:**
+  - `handler`: The closure to execute when notification is received
+  - `queue`: The dispatch queue to handle the notification on
+  
+  **Returns:** A notification token
+</ParamField>
+
+<ParamField path="register()" type="() throws -> NotificationToken">
+  Creates a token that can be used to check if a notification has been posted
+  
+  **Returns:** A notification token
+</ParamField>
+
+<ParamField path="register(signal:)" type="(Int32) throws -> NotificationToken">
+  Requests that a signal be sent when a notification is posted
+  
+  **Parameters:**
+  - `signal`: The signal number to send
+  
+  **Returns:** A notification token
+  
+  <Warning>
+    Once a signal is received, you must call `NotificationToken.check()` for each potential token to determine which name was responsible.
+  </Warning>
+</ParamField>
+
+<ParamField path="register(machPort:flags:)" type="(inout Mach.Port?, NotifyFlags) throws -> NotificationToken">
+  Requests that a Mach message be sent to a port when notification is posted
+  
+  **Parameters:**
+  - `machPort`: The Mach port to send messages to
+  - `flags`: Notification flags
+  
+  **Returns:** A notification token
+  
+  <Info>
+    The message ID field in the header will contain the token value.
+  </Info>
+</ParamField>
+
+<ParamField path="register(fileDescriptor:flags:)" type="(inout Int32, NotifyFlags) throws -> NotificationToken">
+  Requests that the file descriptor be written to when notification is posted
+  
+  **Parameters:**
+  - `fd`: The file descriptor to write to
+  - `flags`: Notification flags
+  
+  **Returns:** A notification token
+  
+  <Info>
+    The token value will be written to the file descriptor.
+  </Info>
+</ParamField>
+
+### NotificationToken
+
+```swift
+public struct NotificationToken: RawRepresentable {
+    public let rawValue: Int32
+}
+```
+
+#### Methods
+
+<ParamField path="check()" type="() throws -> Bool">
+  Checks if a notification has been posted for this token
+  
+  **Returns:** `true` if a notification was posted
+</ParamField>
+
+<ParamField path="cancel()" type="() throws -> Void">
+  Cancels the notification token
+</ParamField>
+
+<ParamField path="resume()" type="() throws -> Void">
+  Resumes the notification token
+</ParamField>
+
+<ParamField path="setState(_:)" type="(UInt64) throws -> Void">
+  Sets an arbitrary state value for the token
+</ParamField>
+
+<ParamField path="getState()" type="() throws -> UInt64">
+  Gets the arbitrary state value for the token
+</ParamField>
+
+### NotifyFlags
+
+```swift
+public struct NotifyFlags: OptionSet {
+    public static let reuse: NotifyFlags
+}
+```
+
+<ParamField path="reuse" type="NotifyFlags">
+  Reuse the given notification mechanism if possible
+</ParamField>
+
+#### Example
+
+```swift
+import OSCore
+
+// Post a notification
+let notif = OS.Notify.NotificationName("com.example.mynotification")
+try notif.post()
+
+// Register a handler
+let token = try notif.register(handler: { token in
+    print("Notification received!")
+}, onQueue: .main)
+
+// Check for notifications
+let token2 = try notif.register()
+if try token2.check() {
+    print("Notification was posted")
+}
+
+// Clean up
+try token.cancel()
+try token2.cancel()
+```
+
+---
+
+## Once Execution
+
+Primitives for executing code exactly once.
+
+### Types
+
+```swift
+public typealias Once = os_once_t
+public typealias Function = os_function_t
+```
+
+### Methods
+
+<ParamField path="_once(_:_:_:)" type="(inout Once, UnsafeMutableRawPointer?, Function) -> Void">
+  Executes a function once, passing it an optional context
+  
+  **Parameters:**
+  - `predicate`: The once predicate
+  - `context`: Optional context pointer
+  - `function`: The function to execute
+</ParamField>
+
+<ParamField path="__onceReset(_:)" type="(inout Once) -> Void">
+  Resets the given predicate
+  
+  <Warning>
+    This function is intended for internal use only and may not work as expected in all cases.
+  </Warning>
+</ParamField>
+
+#### Example
+
+```swift
+import OSCore
+
+var predicate: OS.Once = 0
+
+func initOnce() {
+    var context = MyContext()
+    withUnsafeMutablePointer(to: &context) { ptr in
+        OS._once(&predicate, ptr) { contextPtr in
+            let ctx = contextPtr!.assumingMemoryBound(to: MyContext.self).pointee
+            print("Initialized once with context: \(ctx)")
+        }
+    }
+}
+
+// First call executes the block
+initOnce()  // Prints: "Initialized once..."
+
+// Subsequent calls do nothing
+initOnce()  // No output
+```
+
+---
+
+## AllocOnce
+
+Primitives for allocating memory once.
+
+### Types
+
+```swift
+public typealias AllocToken = os_alloc_token_t
+public typealias _AllocOnceSlot = _os_alloc_once_s
+```
+
+### AllocOnceKey
+
+Allocation keys for system libraries.
+
+```swift
+public struct AllocOnceKey: NamedOptionEnum {
+    public let rawValue: Int32
+    public var name: String?
+}
+```
+
+#### Available Keys
+
+<ResponseField name="System Library Keys" type="AllocOnceKey">
+  - `.libsystemNotify` - libsystem_notify
+  - `.libxpc` - libxpc
+  - `.libsystemC` - libsystem_c
+  - `.libsystemInfo` - libsystem_info
+  - `.libsystemNetwork` - libsystem_network
+  - `.libcache` - libcache
+  - `.libCommonCrypto` - libCommonCrypto
+  - `.libdispatch` - libdispatch
+  - `.libdyld` - libdyld
+  - `.libkeymgr` - libkeymgr
+  - `.liblaunch` - liblaunch
+  - `.libmacho` - libmacho
+  - `.osTrace` - os_trace
+  - `.libsystemBlocks` - libsystem_blocks
+  - `.libsystemMalloc` - libsystem_malloc
+  - `.libsystemPlatform` - libsystem_platform
+  - `.libsystemPthread` - libsystem_pthread
+  - `.libsystemStats` - libsystem_stats
+  - `.libsecinit` - libsecinit
+  - `.libsystemCoreServices` - libsystem_coreservices
+  - `.libsystemSymptoms` - libsystem_symptoms
+  - `.libsystemPlatformASL` - libsystem_platform_asl
+  - `.libsystemFeatureFlags` - libsystem_feature_flags
+</ResponseField>
+
+### _AllocOnceTable
+
+A table of once-allocated memory slots.
+
+```swift
+@MainActor
+public struct _AllocOnceTable {
+    public static subscript(key: AllocOnceKey) -> UnsafeMutablePointer<_AllocOnceSlot>?
+}
+```
+
+### Methods
+
+<ParamField path="_allocOnce(_:size:initFunction:)" type="(UnsafeMutablePointer<_AllocOnceSlot>, size_t, Function?) -> UnsafeMutableRawPointer?">
+  Allocates memory once, optionally initializing it with a function
+  
+  **Parameters:**
+  - `slot`: Pointer to the allocation slot
+  - `size`: Size of memory to allocate
+  - `initFunction`: Optional initialization function
+  
+  **Returns:** Pointer to the allocated memory
+</ParamField>
+
+---
+
+## Variant
+
+Helpers for checking OS variant properties.
+
+```swift
+public struct Variant {
+    public init(subsystem: String)
+}
+```
+
+<ParamField path="subsystem" type="String">
+  The subsystem identifier (currently unused)
+</ParamField>
+
+### Properties
+
+<ParamField path="hasInternalContent" type="Bool">
+  Whether the variant has internal content
+</ParamField>
+
+<ParamField path="hasInternalUI" type="Bool">
+  Whether the variant has internal UI
+</ParamField>
+
+<ParamField path="allowsInternalSecurityPolicies" type="Bool">
+  Whether the variant allows internal security policies
+</ParamField>
+
+<ParamField path="hasFactoryContent" type="Bool">
+  Whether the variant has factory content (macOS 10.14.4+, iOS 12.2+)
+</ParamField>
+
+<ParamField path="isDarwinOS" type="Bool">
+  Whether this is a darwinOS variant (macOS 10.15+, iOS 13.0+)
+</ParamField>
+
+<ParamField path="usesEphemeralStorage" type="Bool">
+  Whether the variant uses ephemeral storage (macOS 10.15+, iOS 13.0+)
+</ParamField>
+
+<ParamField path="allowsSecurityResearch" type="Bool">
+  Whether the variant allows security research (macOS 12.0+, iOS 15.0+)
+</ParamField>
+
+<ParamField path="isBaseSystem" type="Bool">
+  Whether this is the macOS BaseSystem (macOS 11.0+, macOS only)
+</ParamField>
+
+<ParamField path="isRecovery" type="Bool">
+  Whether this is recoveryOS (macOS 10.15+, iOS 13.0+)
+</ParamField>
+
+<ParamField path="description" type="String">
+  A string representation of the variant (macOS 11+, iOS 14.0+)
+</ParamField>
+
+### Methods
+
+<ParamField path="check(_:)" type="(String) -> Bool">
+  Checks if the system is the given variant (macOS 10.15+, iOS 13.0+)
+  
+  **Parameters:**
+  - `variant`: The variant string to check
+  
+  **Returns:** `true` if the system is the specified variant
+</ParamField>
+
+#### Example
+
+```swift
+import OSCore
+
+let variant = OS.Variant(subsystem: "com.example.myapp")
+
+if variant.hasInternalContent {
+    print("Running on internal build")
+}
+
+if variant.isRecovery {
+    print("Running in recovery mode")
+}
+
+if #available(macOS 11, *) {
+    print("Variant: \(try variant.description)")
+}
+```
+
+---
+
+## IOKit
+
+Swift wrappers for IOKit framework functionality.
+
+<Info>
+  IOKit APIs are only available when the IOKit framework can be imported (macOS and some iOS configurations).
+</Info>
+
+### IOObject
+
+Base class for IOKit objects.
+
+```swift
+public class IOObject: Mach.Port {
+    public var className: String { get throws }
+    public var kernelRetainCount: UInt32 { get }
+    public var userRetainCount: UInt32 { get }
+    public var retainCount: UInt32 { get }
+}
+```
+
+### IOKitMainPort
+
+The main port for IOKit operations.
+
+```swift
+public class IOKitMainPort: Mach.Port {
+    public init()
+    public init(withBootstrapPort: Mach.BootstrapPort) throws
+}
+```
+
+### IOService
+
+Represents an IOKit service.
+
+```swift
+public class IOService: IOObject {
+    public static func getMatchingService(
+        usingMainPort: IOKitMainPort = .init(),
+        matching: CFDictionary
+    ) -> Self?
+    
+    public static func matching(_ name: String) -> CFMutableDictionary
+    public static func nameMatching(_ name: String) -> CFMutableDictionary
+    
+    public var busyState: UInt32 { get throws }
+    public func open(withOwningTask: Mach.Task = .current, type: UInt32) throws -> IOConnect
+}
+```
+
+### IOIterator
+
+Iterator for IOKit objects.
+
+```swift
+public class IOIterator<ObjectType: IOObject>: IOObject, IteratorProtocol, Sequence {
+    public func reset()
+    public var isValid: Bool { get }
+    public func next() -> ObjectType?
+}
+```
+
+### IORegistryEntry
+
+Represents an entry in the IOKit registry.
+
+```swift
+public class IORegistryEntry: IOObject {
+    public static func getRootEntry(usingMainPort: IOKitMainPort = .init()) -> Self?
+    public init?(fromPath: String, usingMainPort: IOKitMainPort = .init())
+    
+    public func getName(inPlane: String? = nil) throws -> String
+    public func getPath(inPlane: String) throws -> String
+    public var registryEntryID: UInt64 { get throws }
+    
+    public func createCFProperties(
+        withAllocator: CFAllocator? = kCFAllocatorDefault,
+        options: IOOptionBits = 0
+    ) throws -> CFMutableDictionary?
+}
+```
+
+#### Example
+
+```swift
+import OSCore
+
+#if canImport(IOKit)
+// Find a service by name
+let matching = OS.IOService.matching("IOHIDSystem")
+if let service = OS.IOService.getMatchingService(matching: matching) {
+    print("Service name: \(try service.className)")
+    
+    // Get properties
+    if let props = try service.createCFProperties() {
+        print("Properties: \(props)")
+    }
+}
+
+// Iterate registry
+if let root = OS.IORegistryEntry.getRootEntry() {
+    print("Root entry: \(try root.getName())")
+    print("Path: \(try root.getPath(inPlane: "IOService"))")
+}
+#endif
+```

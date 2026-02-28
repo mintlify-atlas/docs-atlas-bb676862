@@ -1,0 +1,556 @@
+---
+title: "KQueue API"
+description: "Kernel event notification mechanism in BSDCore"
+---
+
+## Overview
+
+The BSDCore KQueue API provides access to the kernel event notification mechanism (kqueue). KQueue is a scalable event notification interface for monitoring file descriptors, processes, signals, timers, and other system events.
+
+## KQueue Class
+
+A class representing a kqueue.
+
+```swift
+public class KQueue: RawRepresentable
+```
+
+### Initialization
+
+```swift
+public init() throws
+```
+
+Creates a new kqueue.
+
+```swift
+public init?(rawValue: Int32)
+```
+
+<ParamField path="rawValue" type="Int32" required>
+  The file descriptor of an existing kqueue
+</ParamField>
+
+### Properties
+
+<ResponseField name="rawValue" type="Int32">
+  The file descriptor of the kqueue
+</ResponseField>
+
+## Event Filter Types
+
+### KEventFilterType
+
+Defines the type of events to monitor.
+
+```swift
+public struct KEventFilterType
+```
+
+#### Available Filters
+
+<ResponseField name="read" type="KEventFilterType">
+  Monitor for read events on file descriptors
+</ResponseField>
+
+<ResponseField name="write" type="KEventFilterType">
+  Monitor for write events on file descriptors
+</ResponseField>
+
+<ResponseField name="aio" type="KEventFilterType">
+  Monitor for asynchronous I/O completion
+</ResponseField>
+
+<ResponseField name="vnode" type="KEventFilterType">
+  Monitor for vnode events (file changes)
+</ResponseField>
+
+<ResponseField name="proc" type="KEventFilterType">
+  Monitor for process events
+</ResponseField>
+
+<ResponseField name="signal" type="KEventFilterType">
+  Monitor for signal delivery
+</ResponseField>
+
+<ResponseField name="machPort" type="KEventFilterType">
+  Monitor for Mach port events
+</ResponseField>
+
+<ResponseField name="timer" type="KEventFilterType">
+  Timer events
+</ResponseField>
+
+<ResponseField name="fileSystem" type="KEventFilterType">
+  Monitor for filesystem events
+</ResponseField>
+
+<ResponseField name="user" type="KEventFilterType">
+  User-triggered events
+</ResponseField>
+
+<ResponseField name="virtualMemory" type="KEventFilterType">
+  Virtual memory events
+</ResponseField>
+
+<ResponseField name="exception" type="KEventFilterType">
+  Exception events
+</ResponseField>
+
+#### Private Filters
+
+<ResponseField name="socket" type="KEventFilterType">
+  Socket events (private)
+</ResponseField>
+
+<ResponseField name="memorystatus" type="KEventFilterType">
+  Memory status events (private)
+</ResponseField>
+
+<ResponseField name="skywalkChannel" type="KEventFilterType">
+  Skywalk channel events (private)
+</ResponseField>
+
+<ResponseField name="workloop" type="KEventFilterType">
+  Workloop events (private)
+</ResponseField>
+
+<ResponseField name="exclavesNotification" type="KEventFilterType">
+  Exclaves notification events (private)
+</ResponseField>
+
+## Event Flags
+
+### KEventFlags
+
+Flags for kevent operations.
+
+```swift
+public struct KEventFlags: OptionSet
+```
+
+#### Action Flags
+
+<ResponseField name="add" type="KEventFlags">
+  Add the event to the kqueue
+</ResponseField>
+
+<ResponseField name="delete" type="KEventFlags">
+  Delete the event from the kqueue
+</ResponseField>
+
+<ResponseField name="enable" type="KEventFlags">
+  Enable the event
+</ResponseField>
+
+<ResponseField name="disable" type="KEventFlags">
+  Disable the event (without removing it)
+</ResponseField>
+
+#### Behavior Flags
+
+<ResponseField name="oneshot" type="KEventFlags">
+  Delete the event after it triggers once
+</ResponseField>
+
+<ResponseField name="clear" type="KEventFlags">
+  Clear the event state after retrieval
+</ResponseField>
+
+<ResponseField name="receipt" type="KEventFlags">
+  Request a receipt for the operation
+</ResponseField>
+
+<ResponseField name="dispatch" type="KEventFlags">
+  Dispatch flag
+</ResponseField>
+
+<ResponseField name="userDataSpecific" type="KEventFlags">
+  User data specific flag
+</ResponseField>
+
+<ResponseField name="dispatch2" type="KEventFlags">
+  Dispatch2 flag
+</ResponseField>
+
+<ResponseField name="vanished" type="KEventFlags">
+  Vanished flag
+</ResponseField>
+
+## Event Methods
+
+### event (Standard)
+
+Registers and/or retrieves events for the kqueue.
+
+```swift
+public func event(
+    registeringEvents changes: [kevent]? = nil,
+    retrievingEventsOfCount requestedRetrieveCount: Int32 = 0,
+    timeout: timespec? = nil
+) throws -> [kevent]?
+```
+
+<ParamField path="changes" type="[kevent]?">
+  Events to register or modify (optional)
+</ParamField>
+
+<ParamField path="requestedRetrieveCount" type="Int32">
+  Number of events to retrieve (default: 0)
+</ParamField>
+
+<ParamField path="timeout" type="timespec?">
+  Timeout for the operation (optional)
+</ParamField>
+
+Returns an array of triggered events, or nil if no events occurred.
+
+### event64
+
+Registers and/or retrieves 64-bit events for the kqueue.
+
+```swift
+public func event64(
+    _ changes: [kevent64_s]? = nil,
+    retrievingEventsOfCount requestedRetrieveCount: Int32 = 0,
+    flags: UInt32 = 0,
+    timeout: timespec? = nil
+) throws -> [kevent64_s]?
+```
+
+<ParamField path="changes" type="[kevent64_s]?">
+  Events to register or modify (optional)
+</ParamField>
+
+<ParamField path="requestedRetrieveCount" type="Int32">
+  Number of events to retrieve (default: 0)
+</ParamField>
+
+<ParamField path="flags" type="UInt32">
+  Additional flags (default: 0)
+</ParamField>
+
+<ParamField path="timeout" type="timespec?">
+  Timeout for the operation (optional)
+</ParamField>
+
+### eventQOS
+
+Registers and/or retrieves QoS events for the kqueue.
+
+```swift
+public func eventQOS(
+    _ changes: [kevent_qos_s]? = nil,
+    retrievingEventsOfCount requestedRetrieveCount: Int32 = 0,
+    flags: UInt32 = 0
+) throws -> (events: [kevent_qos_s]?, data: Data)
+```
+
+<ParamField path="changes" type="[kevent_qos_s]?">
+  Events to register or modify (optional)
+</ParamField>
+
+<ParamField path="requestedRetrieveCount" type="Int32">
+  Number of events to retrieve (default: 0)
+</ParamField>
+
+<ParamField path="flags" type="UInt32">
+  Additional flags (default: 0)
+</ParamField>
+
+Returns a tuple containing events and additional data.
+
+### eventID (Static)
+
+Registers and/or retrieves events for a kqueue with a given ID.
+
+```swift
+public static func eventID(
+    _ changes: [kevent_qos_s]? = nil,
+    forKQueueWithID id: kqueue_id_t,
+    retrievingEventsOfCount retrieveCount: Int32 = 0,
+    flags: UInt32 = 0
+) throws -> (events: [kevent_qos_s]?, data: Data)
+```
+
+<ParamField path="changes" type="[kevent_qos_s]?">
+  Events to register or modify (optional)
+</ParamField>
+
+<ParamField path="id" type="kqueue_id_t" required>
+  The kqueue ID
+</ParamField>
+
+<ParamField path="retrieveCount" type="Int32">
+  Number of events to retrieve (default: 0)
+</ParamField>
+
+<ParamField path="flags" type="UInt32">
+  Additional flags (default: 0)
+</ParamField>
+
+## kevent Initializer
+
+Convenience initializer for kevent structures.
+
+```swift
+public init(
+    identifier: UInt,
+    filter: BSD.KEventFilterType,
+    flags: BSD.KEventFlags,
+    filterFlags: UInt32 = 0,
+    filterData: Int = 0,
+    userData: UnsafeMutableRawPointer? = nil
+)
+```
+
+<ParamField path="identifier" type="UInt" required>
+  The identifier for the event (e.g., file descriptor, process ID)
+</ParamField>
+
+<ParamField path="filter" type="BSD.KEventFilterType" required>
+  The filter type
+</ParamField>
+
+<ParamField path="flags" type="BSD.KEventFlags" required>
+  The event flags
+</ParamField>
+
+<ParamField path="filterFlags" type="UInt32">
+  Filter-specific flags (default: 0)
+</ParamField>
+
+<ParamField path="filterData" type="Int">
+  Filter-specific data (default: 0)
+</ParamField>
+
+<ParamField path="userData" type="UnsafeMutableRawPointer?">
+  User-defined data pointer (default: nil)
+</ParamField>
+
+## Example Usage
+
+<CodeGroup>
+
+```swift Basic KQueue
+import BSDCore
+import Darwin
+
+// Create a kqueue
+let kq = try BSD.KQueue()
+
+// Monitor a file descriptor for read events
+let fd: Int32 = // ... your file descriptor
+let event = kevent(
+    identifier: UInt(fd),
+    filter: .read,
+    flags: [.add, .enable],
+    filterFlags: 0,
+    filterData: 0,
+    userData: nil
+)
+
+// Register the event
+try kq.event(registeringEvents: [event])
+
+// Wait for events (with timeout)
+var timeout = timespec(tv_sec: 5, tv_nsec: 0)
+if let events = try kq.event(
+    retrievingEventsOfCount: 10,
+    timeout: &timeout
+) {
+    for event in events {
+        print("Event triggered on fd \(event.ident)")
+    }
+}
+```
+
+```swift Monitor File Changes
+import BSDCore
+import Darwin
+
+// Open a file
+let path = "/path/to/file.txt"
+let fd = open(path, O_RDONLY)
+defer { close(fd) }
+
+// Create kqueue
+let kq = try BSD.KQueue()
+
+// Monitor for file modifications
+let event = kevent(
+    identifier: UInt(fd),
+    filter: .vnode,
+    flags: [.add, .enable, .clear],
+    filterFlags: UInt32(NOTE_WRITE | NOTE_DELETE | NOTE_RENAME),
+    filterData: 0,
+    userData: nil
+)
+
+try kq.event(registeringEvents: [event])
+
+print("Monitoring \(path) for changes...")
+
+while true {
+    if let events = try kq.event(retrievingEventsOfCount: 1) {
+        for event in events {
+            if event.fflags & UInt32(NOTE_WRITE) != 0 {
+                print("File was modified")
+            }
+            if event.fflags & UInt32(NOTE_DELETE) != 0 {
+                print("File was deleted")
+                break
+            }
+            if event.fflags & UInt32(NOTE_RENAME) != 0 {
+                print("File was renamed")
+            }
+        }
+    }
+}
+```
+
+```swift Monitor Process Events
+import BSDCore
+import Darwin
+
+let targetPID: pid_t = 1234
+let kq = try BSD.KQueue()
+
+// Monitor process exit
+let event = kevent(
+    identifier: UInt(targetPID),
+    filter: .proc,
+    flags: [.add, .enable],
+    filterFlags: UInt32(NOTE_EXIT),
+    filterData: 0,
+    userData: nil
+)
+
+try kq.event(registeringEvents: [event])
+
+print("Waiting for process \(targetPID) to exit...")
+
+if let events = try kq.event(retrievingEventsOfCount: 1) {
+    for event in events {
+        print("Process \(event.ident) exited with status \(event.data)")
+    }
+}
+```
+
+```swift Timer Events
+import BSDCore
+import Darwin
+
+let kq = try BSD.KQueue()
+
+// Create a timer that fires every 2 seconds
+let timerID: UInt = 1
+let event = kevent(
+    identifier: timerID,
+    filter: .timer,
+    flags: [.add, .enable],
+    filterFlags: 0,
+    filterData: 2000,  // milliseconds
+    userData: nil
+)
+
+try kq.event(registeringEvents: [event])
+
+print("Timer started...")
+
+for _ in 0..<5 {
+    if let events = try kq.event(retrievingEventsOfCount: 1) {
+        for event in events {
+            print("Timer fired! Count: \(event.data)")
+        }
+    }
+}
+```
+
+```swift Multiple Event Types
+import BSDCore
+import Darwin
+
+let kq = try BSD.KQueue()
+
+// Monitor multiple types of events
+var events = [kevent]()
+
+// Timer event
+events.append(kevent(
+    identifier: 1,
+    filter: .timer,
+    flags: [.add, .enable],
+    filterFlags: 0,
+    filterData: 1000,  // 1 second
+    userData: nil
+))
+
+// Process event
+events.append(kevent(
+    identifier: UInt(getpid()),
+    filter: .proc,
+    flags: [.add, .enable],
+    filterFlags: UInt32(NOTE_SIGNAL),
+    filterData: 0,
+    userData: nil
+))
+
+// Register all events
+try kq.event(registeringEvents: events)
+
+// Wait for any event
+while true {
+    if let triggeredEvents = try kq.event(retrievingEventsOfCount: 10) {
+        for event in triggeredEvents {
+            switch BSD.KEventFilterType(rawValue: event.filter).name {
+            case "timer":
+                print("Timer event")
+            case "proc":
+                print("Process event")
+            default:
+                print("Other event")
+            }
+        }
+    }
+}
+```
+
+```swift Signal Monitoring
+import BSDCore
+import Darwin
+
+let kq = try BSD.KQueue()
+
+// Monitor SIGUSR1
+let event = kevent(
+    identifier: UInt(SIGUSR1),
+    filter: .signal,
+    flags: [.add, .enable],
+    filterFlags: 0,
+    filterData: 0,
+    userData: nil
+)
+
+try kq.event(registeringEvents: [event])
+
+print("Monitoring SIGUSR1 (send with: kill -USR1 \(getpid()))")
+
+if let events = try kq.event(retrievingEventsOfCount: 1) {
+    for event in events {
+        print("Received signal \(event.ident) \(event.data) times")
+    }
+}
+```
+
+</CodeGroup>
+
+## Notes
+
+- KQueues are automatically closed when the object is deallocated
+- Events can be added, modified, or deleted in a single `event()` call
+- Timeouts are optional; omitting them causes the call to block indefinitely
+- The `oneshot` flag automatically removes an event after it triggers
+- The `clear` flag resets edge-triggered events after retrieval
+- Each filter type has specific filter flags (e.g., `NOTE_WRITE` for vnode events)
+- User data pointers allow associating context with events

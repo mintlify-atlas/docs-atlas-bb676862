@@ -1,0 +1,432 @@
+---
+title: Contributing Guide
+description: How to contribute to the Kass Swift library for macOS kernel interaction
+---
+
+Kass welcomes contributions from the community! This guide will help you get started with contributing to the project.
+
+## Message from the Developer
+
+<Note>
+**From [nmggithub](https://github.com/nmggithub), the sole developer:**
+
+"I hope this library is of some use to you, and I look forward to more stable releases in the future. If you have any issues with it, feel free to [file an issue](https://github.com/nmggithub/Kass/issues). If you'd like to contribute, go ahead and [open a PR](https://github.com/nmggithub/Kass/pulls). I appreciate all the feedback and support."
+</Note>
+
+Kass is currently maintained by a single developer who is actively working on improving stability and expanding functionality. Your contributions can make a real impact!
+
+## Ways to Contribute
+
+<CardGroup cols={2}>
+  <Card title="Report Bugs" icon="bug">
+    Found a bug? [File an issue](https://github.com/nmggithub/Kass/issues) with reproduction steps
+  </Card>
+  <Card title="Submit PRs" icon="code-pull-request">
+    Have a fix or feature? [Open a pull request](https://github.com/nmggithub/Kass/pulls)
+  </Card>
+  <Card title="Improve Docs" icon="book">
+    Help improve documentation and examples
+  </Card>
+  <Card title="Test on Older macOS" icon="vial">
+    Help test compatibility with older macOS versions
+  </Card>
+</CardGroup>
+
+## Getting Started
+
+<Steps>
+  <Step title="Fork the repository">
+    Fork [nmggithub/Kass](https://github.com/nmggithub/Kass) to your GitHub account.
+  </Step>
+  
+  <Step title="Clone your fork">
+    ```bash
+    git clone https://github.com/YOUR_USERNAME/Kass.git
+    cd Kass
+    ```
+  </Step>
+  
+  <Step title="Set up development environment">
+    Ensure you have the latest version of Xcode and Swift installed:
+    
+    ```bash
+    swift --version
+    # Swift version should be 6.2 or later
+    ```
+  </Step>
+  
+  <Step title="Build the project">
+    ```bash
+    swift build
+    ```
+    
+    This will build all modules: `MachCore`, `BSDCore`, `Linking`, `Kass`, etc.
+  </Step>
+</Steps>
+
+## Project Structure
+
+### Module Organization
+
+Kass is organized into several modules with clear separation of concerns:
+
+<CodeGroup>
+```plaintext Module Layout
+Sources/
+├── Kass/              # Main namespace module
+├── Mach/
+│   └── Core/          # MachCore module (Mach APIs)
+├── BSD/
+│   └── Core/          # BSDCore module (BSD APIs)
+├── Linking/           # Dynamic linking module
+├── KassHelpers/       # Helper utilities
+├── KassC/             # C compatibility layer
+├── OS/
+│   └── Core/          # OSCore module
+└── Shellcode/         # Shellcode utilities
+```
+
+```swift Dependencies
+// Module dependency hierarchy
+KassHelpers  // No dependencies
+Linking      // No dependencies
+KassC        // C headers and compatibility
+
+MachCore     // Depends on: KassHelpers, KassC, Linking
+BSDCore      // Depends on: KassHelpers, KassC, Linking, MachCore
+OSCore       // Depends on: KassHelpers, KassC, BSDCore, MachCore
+Shellcode    // Depends on: KassHelpers, MachCore
+
+Kass         // Namespace: KassHelpers, BSDCore, MachCore
+```
+</CodeGroup>
+
+### Stability by Module
+
+<AccordionGroup>
+  <Accordion title="MachCore - Stable" icon="check">
+    - **Status:** Mostly stable
+    - **Changes Expected:** Minimal (virtual memory API additions)
+    - **Contribution Focus:** Bug fixes, documentation, performance
+    - **Testing:** Critical - this is the most used module
+  </Accordion>
+
+  <Accordion title="BSDCore - In Development" icon="wrench">
+    - **Status:** Early stages
+    - **Changes Expected:** Frequent API changes
+    - **Contribution Focus:** New APIs, architecture improvements
+    - **Testing:** Important but expect changes
+  </Accordion>
+
+  <Accordion title="Linking - May Merge" icon="arrow-right">
+    - **Status:** Functional but may be folded into BSDCore
+    - **Changes Expected:** Possible reorganization
+    - **Contribution Focus:** Bug fixes only
+    - **Testing:** Maintain compatibility
+  </Accordion>
+</AccordionGroup>
+
+## Code Style Guidelines
+
+### Swift Conventions
+
+Kass follows Swift best practices with specific patterns:
+
+<CodeGroup>
+```swift Namespacing
+// Use nested types for organization
+extension Mach {
+    public class Task: Mach.Port {
+        // Task implementation
+    }
+}
+
+extension Mach {
+    public struct VMFlags: OptionSet {
+        // Flags implementation
+    }
+}
+```
+
+```swift Error Handling
+// All fallible operations throw
+public func suspend() throws {
+    try Mach.call(task_suspend(self.name))
+}
+
+// Use Mach.call wrapper for kernel calls
+try Mach.call(kernelReturnValue)
+```
+
+```swift Documentation
+/// Brief description of the function.
+///
+/// Longer description if needed.
+///
+/// - Parameter param: Description of parameter
+/// - Returns: Description of return value
+/// - Throws: Description of errors that can be thrown
+/// - Important: Critical information
+/// - Warning: Important warnings
+/// - Note: Additional notes
+public func example(param: String) throws -> Int {
+    // Implementation
+}
+```
+
+```swift Type Safety
+// Use option sets for flags
+public struct PortRights: OptionSet {
+    public let rawValue: mach_port_right_t
+    
+    public static let send = Self(rawValue: MACH_PORT_RIGHT_SEND)
+    public static let receive = Self(rawValue: MACH_PORT_RIGHT_RECEIVE)
+}
+
+// Use enums for discrete options
+public enum HandleType {
+    case library
+    case symbol
+}
+```
+</CodeGroup>
+
+### Naming Conventions
+
+- **Classes:** Use clear, descriptive names (`Task`, `Port`, `Thread`)
+- **Properties:** Use `lowerCamelCase` for properties
+- **Functions:** Use verbs for actions (`suspend()`, `resume()`, `allocate()`)
+- **Static Properties:** Use for singleton-like access (`.current`, `.Nil`)
+
+### Platform Availability
+
+Mark APIs with appropriate availability attributes:
+
+```swift
+@available(macOS 11.3, iOS 14.5, *)
+public var isCurrentTask: Bool { 
+    mach_task_is_self(self.name) != 0 
+}
+
+@available(macOS, deprecated: 12.0, message: "Use safer alternatives")
+public func destroy() throws {
+    try Mach.call(mach_port_destroy(self.owningTask.name, self.name))
+}
+```
+
+## Contribution Workflow
+
+<Steps>
+  <Step title="Create a feature branch">
+    ```bash
+    git checkout -b feature/your-feature-name
+    # or
+    git checkout -b fix/your-bug-fix
+    ```
+  </Step>
+  
+  <Step title="Make your changes">
+    Write clean, well-documented code following the style guidelines above.
+    
+    ```swift Example
+    extension Mach.Task {
+        /// Gets the memory usage of the task.
+        ///
+        /// - Returns: Memory usage in bytes
+        /// - Throws: `MachError` if the operation fails
+        public func memoryUsage() throws -> UInt64 {
+            // Implementation
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Build and test">
+    ```bash
+    # Build all modules
+    swift build
+    
+    # Run tests if available
+    swift test
+    
+    # Test on your target macOS version
+    ```
+  </Step>
+  
+  <Step title="Commit your changes">
+    Write clear commit messages:
+    
+    ```bash
+    git add .
+    git commit -m "Add memory usage API to Task"
+    ```
+    
+    Good commit message examples:
+    - `Add memory usage query to Mach.Task`
+    - `Fix port rights enumeration bug`
+    - `Update documentation for virtual memory APIs`
+    - `Improve error handling in thread creation`
+  </Step>
+  
+  <Step title="Push to your fork">
+    ```bash
+    git push origin feature/your-feature-name
+    ```
+  </Step>
+  
+  <Step title="Open a pull request">
+    Go to [github.com/nmggithub/Kass/pulls](https://github.com/nmggithub/Kass/pulls) and open a PR.
+    
+    Include in your PR description:
+    - What problem does this solve?
+    - What APIs or behaviors changed?
+    - Any breaking changes?
+    - Testing performed
+  </Step>
+</Steps>
+
+## What to Contribute
+
+### High-Value Contributions
+
+<Accordion title="Missing Mach APIs">
+  The XNU kernel has many APIs not yet wrapped in Kass. Adding new APIs to `MachCore` is valuable.
+  
+  **Example areas:**
+  - Memory management operations
+  - Advanced port operations  
+  - Clock and timing APIs
+  - Processor and processor set management
+</Accordion>
+
+<Accordion title="BSD API Coverage">
+  `BSDCore` is in early stages and needs expansion.
+  
+  **Example areas:**
+  - File system operations
+  - Process management
+  - Network interfaces
+  - System call wrappers
+</Accordion>
+
+<Accordion title="Documentation & Examples">
+  Clear documentation helps everyone.
+  
+  **Ways to help:**
+  - Add code examples to existing APIs
+  - Write tutorials for common use cases
+  - Improve inline documentation
+  - Add safety warnings where appropriate
+</Accordion>
+
+<Accordion title="Testing & Compatibility">
+  Kass is primarily tested on the latest macOS.
+  
+  **Testing needs:**
+  - Verify deprecated APIs on older macOS
+  - Test on different macOS versions
+  - Report compatibility issues
+  - Add test cases
+</Accordion>
+
+## Licensing
+
+Most of Kass is MIT-licensed, but be aware:
+
+<Warning>
+"Most of this code is MIT-licensed. However, there are some cases where substance is copied from header files licensed under [Apple's Public Source License](https://opensource.apple.com/apsl/) and other licenses. Where deemed appropriate, copyright notices for the relevant licenses are included. Please see the source code for more information."
+</Warning>
+
+When contributing:
+- Check if your code includes Apple header content
+- Include appropriate copyright notices if required
+- Default new contributions to MIT license
+
+## Communication
+
+### Reporting Issues
+
+When [filing an issue](https://github.com/nmggithub/Kass/issues), include:
+
+```markdown Issue Template
+**Description:**
+Clear description of the problem or feature request
+
+**Steps to Reproduce:**
+1. Step one
+2. Step two  
+3. Step three
+
+**Expected Behavior:**
+What should happen
+
+**Actual Behavior:**
+What actually happens
+
+**Environment:**
+- macOS Version: 
+- Xcode Version:
+- Swift Version:
+- Kass Version:
+
+**Code Sample:**
+```swift
+// Minimal code to reproduce
+```
+```
+
+### Pull Request Template
+
+When [opening a PR](https://github.com/nmggithub/Kass/pulls):
+
+```markdown PR Template
+## Description
+Brief description of changes
+
+## Motivation
+Why is this change needed?
+
+## Changes Made
+- Change 1
+- Change 2
+- Change 3
+
+## Breaking Changes
+List any breaking changes (or "None")
+
+## Testing
+How was this tested?
+
+## Checklist
+- [ ] Code builds successfully
+- [ ] Follows code style guidelines
+- [ ] Documentation updated
+- [ ] No breaking changes (or documented)
+```
+
+## Resources
+
+<CardGroup cols={2}>
+  <Card title="GitHub Repository" icon="github" href="https://github.com/nmggithub/Kass">
+    Main repository and issue tracker
+  </Card>
+  <Card title="API Documentation" icon="book" href="https://swiftpackageindex.com/nmggithub/Kass">
+    Generated documentation on Swift Package Index
+  </Card>
+  <Card title="XNU Source" icon="code" href="https://opensource.apple.com/source/xnu/">
+    Apple's open source XNU kernel code
+  </Card>
+  <Card title="Examples" icon="lightbulb" href="/resources/examples">
+    Usage examples and patterns
+  </Card>
+</CardGroup>
+
+## Questions?
+
+If you have questions about contributing:
+
+1. Check existing [issues](https://github.com/nmggithub/Kass/issues) and [pull requests](https://github.com/nmggithub/Kass/pulls)
+2. Open a new issue with the `question` label
+3. Tag `@nmggithub` for maintainer attention
+
+Thank you for contributing to Kass!

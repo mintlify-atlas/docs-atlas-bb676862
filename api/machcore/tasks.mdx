@@ -1,0 +1,573 @@
+---
+title: Task API
+description: API reference for Mach task types, operations, and information in the Kass Swift library
+---
+
+# Task API
+
+The Task API provides Swift-friendly access to Mach tasks, which represent execution contexts and address spaces.
+
+## Core Types
+
+### Mach.Task
+
+A task (port).
+
+```swift
+open class Task: Mach.Port
+```
+
+#### Static Properties
+
+<ResponseField name="current" type="TaskControl">
+  The current task
+  
+  ```swift
+  public static var current: TaskControl
+  ```
+</ResponseField>
+
+#### Instance Properties
+
+<ResponseField name="pid" type="pid_t">
+  The PID of the task (throws on failure)
+  
+  ```swift
+  public var pid: pid_t { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="isCurrentTask" type="Bool">
+  Whether the task is the current task (macOS 11.3+)
+  
+  ```swift
+  @available(macOS 11.3, iOS 14.5, *)
+  public var isCurrentTask: Bool
+  ```
+</ResponseField>
+
+<ResponseField name="threads" type="[Mach.Thread]">
+  The threads in the task (throws on failure)
+  
+  ```swift
+  public var threads: [Mach.Thread] { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="ports" type="[Mach.Port]">
+  The ports (really, port names) in the task's name space (throws on failure)
+  
+  ```swift
+  public var ports: [Mach.Port] { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="role" type="task_role">
+  The task's role (throws on failure)
+  
+  ```swift
+  public var role: task_role { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="stashedPorts" type="[Mach.Port]">
+  The task's stashed ports (throws on failure)
+  
+  ```swift
+  public var stashedPorts: [Mach.Port] { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="nameSpaceInfo" type="ipc_info_space_t">
+  Information about the task's name space (throws on failure)
+  
+  ```swift
+  public var nameSpaceInfo: ipc_info_space_t { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="nameSpaceTable" type="[ipc_info_name_t]">
+  The task's name space table (throws on failure)
+  
+  ```swift
+  public var nameSpaceTable: [ipc_info_name_t] { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="nameSpaceTree" type="[ipc_info_tree_name_t]">
+  The task's name space tree (throws on failure). This will likely be empty as the name space tree is not currently used.
+  
+  ```swift
+  public var nameSpaceTree: [ipc_info_tree_name_t] { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="info" type="Mach.TaskInfoManager">
+  The task's info manager
+  
+  ```swift
+  public var info: Mach.TaskInfoManager
+  ```
+</ResponseField>
+
+<ResponseField name="vm" type="Mach.VirtualMemoryManager">
+  The virtual memory manager for this task
+  
+  ```swift
+  public var vm: Mach.VirtualMemoryManager
+  ```
+</ResponseField>
+
+#### Methods
+
+```swift
+public static func debugPort<PortType: Mach.Port>(forPID pid: pid_t) throws -> PortType
+```
+
+Atomically gets the debug port for the task with the given PID.
+
+---
+
+```swift
+public func suspend() throws
+```
+
+Suspends the task.
+
+---
+
+```swift
+public func resume() throws
+```
+
+Resumes the task.
+
+---
+
+```swift
+public func terminate() throws
+```
+
+Terminates the task.
+
+---
+
+```swift
+public func suspend2() throws -> Mach.TaskSuspensionToken
+```
+
+Suspends the task and receives a suspension token.
+
+---
+
+```swift
+public func resume2(token: Mach.TaskSuspensionToken) throws
+```
+
+Resumes the task with a suspension token.
+
+---
+
+```swift
+public func setPhysicalFootprintLimit(_ limit: Int32) throws -> Int32
+```
+
+Sets the physical footprint limit for the task.
+
+<ParamField path="limit" type="Int32" required>
+  The new limit
+</ParamField>
+
+**Returns:** The old limit.
+
+---
+
+```swift
+public func setRole(to role: task_role) throws
+```
+
+Sets the task's role.
+
+---
+
+```swift
+public func stashPorts(_ ports: [Mach.Port]) throws
+```
+
+Stashes the given ports in the task.
+
+---
+
+```swift
+public func kernelcacheData(of kcObject: Mach.Port) throws -> Data
+```
+
+Gets the data of a kernelcache object.
+
+---
+
+```swift
+public func kernelcacheData<DataType>(
+    of kcObject: Mach.Port,
+    as type: DataType.Type
+) throws -> DataType
+```
+
+Gets the data of a kernelcache object as a specific type.
+
+---
+
+```swift
+public func getDefaultThreadState<DataType>(
+    _ threadState: Mach.ThreadState<DataType>
+) throws -> DataType
+```
+
+Gets the default state for new threads in the task.
+
+**Warning:** This call will fail if data is included in the state argument.
+
+---
+
+```swift
+public func setDefaultThreadState<DataType>(
+    _ threadState: Mach.ThreadState<DataType>
+) throws
+```
+
+Sets the default state for new threads in the task.
+
+**Warning:** This call will fail if data is not included in the state argument.
+
+---
+
+```swift
+public func clearDefaultThreadState() throws
+```
+
+Clears the default thread state for the task.
+
+## Task Special Ports
+
+### Mach.TaskSpecialPort
+
+A special port for a task.
+
+```swift
+public struct TaskSpecialPort
+```
+
+<ParamField path="control" type="TaskSpecialPort">
+  The task's control port
+</ParamField>
+
+<ParamField path="host" type="TaskSpecialPort">
+  The host port for the host that the task is in
+</ParamField>
+
+<ParamField path="name" type="TaskSpecialPort">
+  The task's name port
+</ParamField>
+
+<ParamField path="bootstrap" type="TaskSpecialPort">
+  The bootstrap port, used to get ports for Mach services
+</ParamField>
+
+<ParamField path="inspect" type="TaskSpecialPort">
+  The task's inspect port
+</ParamField>
+
+<ParamField path="read" type="TaskSpecialPort">
+  The task's read port
+</ParamField>
+
+<ParamField path="access" type="TaskSpecialPort">
+  A port for determining access to the different flavored task ports
+</ParamField>
+
+<ParamField path="debug" type="TaskSpecialPort">
+  The task's debug port
+</ParamField>
+
+#### Methods
+
+```swift
+public func get<PortType: Mach.Port>(
+    for task: Mach.Task = .current,
+    as type: PortType.Type = PortType.self
+) throws -> PortType
+```
+
+Gets the special port for a task.
+
+---
+
+```swift
+public func set(for task: Mach.Task = .current, to port: Mach.Port) throws
+```
+
+Sets the special port for a task.
+
+### Task Special Port Accessors
+
+The `Mach.Task` class provides convenient accessors for special ports:
+
+<ResponseField name="hostPort" type="Mach.Host">
+  The port for the host that the task is in (throws on failure)
+</ResponseField>
+
+<ResponseField name="controlPort" type="Mach.TaskControl">
+  The task's control port (throws on failure)
+</ResponseField>
+
+<ResponseField name="namePort" type="Mach.TaskName">
+  The task name port (throws on failure)
+</ResponseField>
+
+<ResponseField name="inspectPort" type="Mach.TaskInspect">
+  The task's inspect port (throws on failure)
+</ResponseField>
+
+<ResponseField name="readPort" type="Mach.TaskRead">
+  The task's read port (throws on failure)
+</ResponseField>
+
+<ResponseField name="accessPort" type="Mach.Port">
+  The access port for the task (throws on failure)
+</ResponseField>
+
+<ResponseField name="debugPort" type="Mach.Port">
+  The task's debug port (throws on failure)
+</ResponseField>
+
+## Task Info
+
+### Mach.TaskInfoManager
+
+Manages task information retrieval.
+
+```swift
+public struct TaskInfoManager
+```
+
+#### Methods
+
+```swift
+public func get<DataType: BitwiseCopyable>(
+    _ flavor: Mach.TaskInfoFlavor,
+    as type: DataType.Type = DataType.self
+) throws -> DataType
+```
+
+Gets the task's info.
+
+#### Info Properties
+
+<ResponseField name="basicInfo" type="mach_task_basic_info">
+  Basic information about the task (throws on failure)
+</ResponseField>
+
+<ResponseField name="eventCounts" type="task_events_info">
+  Counts of specific events on the task (throws on failure)
+</ResponseField>
+
+<ResponseField name="threadTimes" type="task_thread_times_info">
+  Total thread run times for the task (throws on failure)
+</ResponseField>
+
+<ResponseField name="absoluteTimes" type="task_absolutetime_info">
+  Absolute times for the task (throws on failure)
+</ResponseField>
+
+<ResponseField name="kernelMemoryInfo" type="task_kernelmemory_info">
+  Kernel memory information for the task (throws on failure)
+</ResponseField>
+
+<ResponseField name="securityToken" type="security_token_t">
+  The task's security token (throws on failure)
+</ResponseField>
+
+<ResponseField name="auditToken" type="audit_token_t">
+  The task's audit token (throws on failure)
+</ResponseField>
+
+<ResponseField name="affinityTagInfo" type="task_affinity_tag_info">
+  The task's affinity tag information (throws on failure)
+</ResponseField>
+
+<ResponseField name="extmodInfo" type="task_extmod_info">
+  Information about external modifications to the task (throws on failure)
+</ResponseField>
+
+<ResponseField name="powerInfo" type="task_power_info">
+  Information about the task's power usage (throws on failure)
+</ResponseField>
+
+<ResponseField name="powerInfoV2" type="task_power_info_v2">
+  Information about the task's power usage (newer version, throws on failure)
+</ResponseField>
+
+<ResponseField name="vmInfo" type="task_vm_info">
+  Information about the task's virtual memory usage (throws on failure)
+</ResponseField>
+
+<ResponseField name="vmPurgeableInfo" type="task_vm_info">
+  Information about the task's virtual memory usage, including purgeable memory (throws on failure)
+</ResponseField>
+
+<ResponseField name="flags" type="task_flags_info">
+  The task's flags (throws on failure)
+</ResponseField>
+
+### Mach.TaskInfoFlavor
+
+A flavor of task info.
+
+```swift
+public struct TaskInfoFlavor
+```
+
+<ParamField path="basic" type="TaskInfoFlavor">
+  Basic information about the task
+</ParamField>
+
+<ParamField path="events" type="TaskInfoFlavor">
+  Counts of specific events on the task
+</ParamField>
+
+<ParamField path="threadTimes" type="TaskInfoFlavor">
+  Total thread run times for the task
+</ParamField>
+
+<ParamField path="absoluteTimes" type="TaskInfoFlavor">
+  Absolute times for the task
+</ParamField>
+
+<ParamField path="kernelMemory" type="TaskInfoFlavor">
+  Kernel memory information for the task
+</ParamField>
+
+<ParamField path="securityToken" type="TaskInfoFlavor">
+  The task's security token
+</ParamField>
+
+<ParamField path="auditToken" type="TaskInfoFlavor">
+  The task's audit token
+</ParamField>
+
+<ParamField path="affinityTag" type="TaskInfoFlavor">
+  The task's affinity tag information
+</ParamField>
+
+<ParamField path="dyld" type="TaskInfoFlavor">
+  Information about dyld images in the task
+</ParamField>
+
+<ParamField path="extmod" type="TaskInfoFlavor">
+  Information about external modifications to the task
+</ParamField>
+
+<ParamField path="power" type="TaskInfoFlavor">
+  Information about the task's power usage
+</ParamField>
+
+<ParamField path="powerV2" type="TaskInfoFlavor">
+  Information about the task's power usage (newer version)
+</ParamField>
+
+<ParamField path="vm" type="TaskInfoFlavor">
+  Information about the task's virtual memory usage
+</ParamField>
+
+<ParamField path="vmPurgeable" type="TaskInfoFlavor">
+  Information about the task's virtual memory usage, including purgeable memory
+</ParamField>
+
+<ParamField path="flags" type="TaskInfoFlavor">
+  The task's flags
+</ParamField>
+
+## Task Roles
+
+### task_role
+
+Extension for task roles.
+
+<ParamField path="reniced" type="task_role">
+  Reniced task
+</ParamField>
+
+<ParamField path="unspecified" type="task_role">
+  Unspecified task
+</ParamField>
+
+<ParamField path="foreground" type="task_role">
+  Foreground application
+</ParamField>
+
+<ParamField path="background" type="task_role">
+  Background application
+</ParamField>
+
+<ParamField path="control" type="task_role">
+  Control application
+</ParamField>
+
+<ParamField path="graphicsServer" type="task_role">
+  Graphics server
+</ParamField>
+
+<ParamField path="throttle" type="task_role">
+  Throttle application
+</ParamField>
+
+<ParamField path="nonUI" type="task_role">
+  Non-UI application
+</ParamField>
+
+<ParamField path="default" type="task_role">
+  Default application
+</ParamField>
+
+<ParamField path="darwinBackground" type="task_role">
+  Darwin background application
+</ParamField>
+
+## Usage Example
+
+```swift
+import Mach
+
+// Get the current task
+let task = Mach.Task.current
+
+// Get basic info
+let basicInfo = try task.info.basicInfo
+print("Virtual size: \(basicInfo.virtual_size)")
+print("Resident size: \(basicInfo.resident_size)")
+
+// Get the task's PID
+let pid = try task.pid
+print("Task PID: \(pid)")
+
+// Get all threads
+let threads = try task.threads
+print("Thread count: \(threads.count)")
+
+// Suspend and resume
+try task.suspend()
+defer { try? task.resume() }
+
+// Work with task role
+let role = try task.role
+print("Current role: \(role)")
+try task.setRole(to: .background)
+
+// Get special ports
+let bootstrap = try task.getSpecialPort(.bootstrap, as: Mach.Port.self)
+let hostPort = try task.hostPort
+
+// Memory info
+let vmInfo = try task.info.vmInfo
+print("Page size: \(vmInfo.page_size)")
+```

@@ -1,80 +1,295 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Get started with Kass by inspecting task information and exploring kernel interfaces
 ---
 
-## Get started in three steps
+# Quick start
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through creating your first program with Kass. We'll explore task inspection, thread enumeration, and host information queries.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+Make sure you've completed the [installation](/installation) steps and added Kass to your Swift package.
+
+## Your first Kass program
+
+Let's create a simple program that inspects the current task and prints information about it.
+
+<Steps>
+  <Step title="Create a new Swift file">
+    Create a file named `main.swift` in your project:
+
+    ```swift main.swift
+    import MachCore
+    ```
+  </Step>
+
+  <Step title="Get the current task">
+    Access the current task and retrieve its basic information:
+
+    ```swift main.swift
+    import MachCore
+
+    // Get the current task
+    let currentTask = Mach.Task.current
+
+    // Get the process ID
+    let pid = try currentTask.pid
+    print("Current task PID: \(pid)")
+    ```
+
+    <Note>
+      `Mach.Task.current` provides a reference to the current process's task port. This is the primary way to interact with your own process through the Mach interface.
+    </Note>
+  </Step>
+
+  <Step title="Retrieve task information">
+    Query detailed information about the task:
+
+    ```swift main.swift
+    import MachCore
+
+    let currentTask = Mach.Task.current
+    let pid = try currentTask.pid
+    print("Current task PID: \(pid)")
+
+    // Get basic task information
+    let basicInfo = try currentTask.info.basicInfo
+    print("Virtual memory size: \(basicInfo.virtual_size) bytes")
+    print("Resident memory size: \(basicInfo.resident_size) bytes")
+    print("Suspend count: \(basicInfo.suspend_count)")
+    ```
+
+    The `info` property provides a `TaskInfoManager` that exposes various information flavors about the task.
+  </Step>
+
+  <Step title="Enumerate threads">
+    List all threads in the current task:
+
+    ```swift main.swift
+    import MachCore
+
+    let currentTask = Mach.Task.current
+    let pid = try currentTask.pid
+    print("Current task PID: \(pid)")
+
+    let basicInfo = try currentTask.info.basicInfo
+    print("Virtual memory size: \(basicInfo.virtual_size) bytes")
+    print("Resident memory size: \(basicInfo.resident_size) bytes")
+
+    // Get all threads in the task
+    let threads = try currentTask.threads
+    print("\nNumber of threads: \(threads.count)")
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    for (index, thread) in threads.enumerated() {
+        print("Thread \(index): \(thread.name)")
+    }
+    ```
+
+    <Tip>
+      The `threads` property returns an array of `Mach.Thread` objects representing all threads in the task.
+    </Tip>
+  </Step>
+
+  <Step title="Run your program">
+    Build and run your program:
+
+    ```bash
+    swift run
+    ```
+
+    You should see output similar to:
+
+    ```
+    Current task PID: 12345
+    Virtual memory size: 4294967296 bytes
+    Resident memory size: 16777216 bytes
+
+    Number of threads: 4
+    Thread 0: 0x00001234
+    Thread 1: 0x00005678
+    Thread 2: 0x00009abc
+    Thread 3: 0x0000def0
+    ```
+  </Step>
+</Steps>
+
+## Complete example
+
+Here's the complete program with error handling:
+
+```swift main.swift
+import MachCore
+import Foundation
+
+do {
+    // Get the current task
+    let currentTask = Mach.Task.current
+    let pid = try currentTask.pid
+    print("Current task PID: \(pid)")
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    // Get basic task information
+    let basicInfo = try currentTask.info.basicInfo
+    print("Virtual memory size: \(basicInfo.virtual_size) bytes")
+    print("Resident memory size: \(basicInfo.resident_size) bytes")
+    print("Suspend count: \(basicInfo.suspend_count)")
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    // Get memory information
+    let vmInfo = try currentTask.info.vmInfo
+    print("\nVirtual memory info:")
+    print("  Page size: \(vmInfo.page_size) bytes")
+    print("  Phys footprint: \(vmInfo.phys_footprint) bytes")
+    
+    // Enumerate threads
+    let threads = try currentTask.threads
+    print("\nNumber of threads: \(threads.count)")
+    
+    for (index, thread) in threads.enumerated() {
+        print("Thread \(index): \(String(format: "0x%08x", thread.name))")
+    }
+    
+} catch {
+    print("Error: \(error)")
+}
+```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Exploring host information
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+You can also query information about the host system:
 
-### Step 3: Go live
+```swift
+import MachCore
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+let host = Mach.Host.current
+
+// Get kernel version
+let kernelVersion = try host.kernelVersion
+print("Kernel version: \(kernelVersion)")
+
+// Get page size
+let pageSize = try host.pageSize
+print("Page size: \(pageSize) bytes")
+
+// Get basic host information
+let hostInfo = try host.info.basic
+print("CPU type: \(hostInfo.cpu_type)")
+print("CPU subtype: \(hostInfo.cpu_subtype)")
+print("Physical CPUs: \(hostInfo.physical_cpu)")
+print("Logical CPUs: \(hostInfo.logical_cpu)")
+print("Memory size: \(hostInfo.max_mem) bytes")
+```
+
+## Working with other tasks
+
+To inspect other processes, you need their task port. This typically requires elevated privileges:
+
+<Warning>
+  Accessing task ports of other processes requires appropriate entitlements and/or running with elevated privileges. This is restricted by macOS security policies.
+</Warning>
+
+```swift
+import MachCore
+
+// Get task for a specific PID (requires privileges)
+do {
+    let targetPID: pid_t = 1234
+    let targetTask = try Mach.Task.forPID(targetPID)
+    
+    let basicInfo = try targetTask.info.basicInfo
+    print("Target task virtual size: \(basicInfo.virtual_size)")
+    
+} catch {
+    print("Failed to get task for PID: \(error)")
+}
+```
+
+## Common patterns
+
+### Task suspension and resumption
+
+```swift
+import MachCore
+
+let task = Mach.Task.current
+
+// Suspend the task
+try task.suspend()
+
+// ... perform operations while suspended ...
+
+// Resume the task
+try task.resume()
+```
+
+### Thread control
+
+```swift
+import MachCore
+
+let currentThread = Mach.Thread.current
+
+// Suspend a thread
+try currentThread.suspend()
+
+// Resume a thread
+try currentThread.resume()
+```
+
+### Port rights inspection
+
+```swift
+import MachCore
+
+let task = Mach.Task.current
+let ports = try task.ports
+
+print("Task has \(ports.count) port names")
+
+for port in ports.prefix(10) {
+    let rights = try? port.rights
+    print("Port \(String(format: "0x%08x", port.name)): \(rights?.rights ?? [])")
+}
+```
+
+## Error handling
+
+Kass functions that interact with the kernel throw errors of type `MachError`:
+
+```swift
+import MachCore
+
+do {
+    let info = try Mach.Task.current.info.basicInfo
+    print("Success: \(info)")
+} catch let error as MachError {
+    switch error {
+    case .invalidArgument:
+        print("Invalid argument passed to kernel")
+    case .failure:
+        print("Kernel operation failed")
+    default:
+        print("Mach error: \(error)")
+    }
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
+Now that you've created your first Kass program, you can:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Explore MachCore" icon="book">
+    Dive deeper into task management, IPC messaging, and virtual memory operations
+  </Card>
+  <Card title="API Documentation" icon="code" href="https://swiftpackageindex.com/nmggithub/Kass/main/documentation/kass/">
+    Browse the complete API reference on Swift Package Index
+  </Card>
+  <Card title="Source Code" icon="github" href="https://github.com/nmggithub/Kass">
+    Explore the source code and examples on GitHub
+  </Card>
+  <Card title="Report Issues" icon="bug" href="https://github.com/nmggithub/Kass/issues">
+    Found a bug or have a feature request? Let us know
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

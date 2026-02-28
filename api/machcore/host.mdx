@@ -1,0 +1,219 @@
+---
+title: Host API
+description: API reference for Mach host types and system-level operations in the Kass Swift library
+---
+
+# Host API
+
+The Host API provides Swift-friendly access to Mach host operations, which represent the machine and provide system-level information.
+
+## Core Types
+
+### Mach.Host
+
+A host.
+
+```swift
+public class Host: Mach.Port
+```
+
+#### Static Properties
+
+<ResponseField name="current" type="Self">
+  The current host
+  
+  ```swift
+  public static var current: Self
+  ```
+</ResponseField>
+
+#### Instance Properties
+
+<ResponseField name="isPrivileged" type="Bool">
+  Whether the host port is privileged (throws on failure)
+  
+  **Important:** This property accessor is throwing as it calls the kernel to determine the underlying kernel object type.
+  
+  **Warning:** This property accessor will crash the program if it determines that the port isn't actually a host port.
+  
+  ```swift
+  public var isPrivileged: Bool { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="bootInfo" type="String">
+  The boot info for the host (throws on failure)
+  
+  ```swift
+  public var bootInfo: String { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="kernelVersion" type="String">
+  The kernel version for the host (throws on failure)
+  
+  ```swift
+  public var kernelVersion: String { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="pageSize" type="vm_size_t">
+  The page size for the host (throws on failure)
+  
+  ```swift
+  public var pageSize: vm_size_t { get throws }
+  ```
+</ResponseField>
+
+#### Methods
+
+```swift
+public func reboot(option: Mach.HostRebootOption = .init(rawValue: 0)) throws
+```
+
+Reboots the host.
+
+<ParamField path="option" type="Mach.HostRebootOption" default=".init(rawValue: 0)">
+  Reboot option (e.g., `.halt`, `.upsDelay`, `.debugger`)
+</ParamField>
+
+---
+
+```swift
+public func getDefaultMemoryManager() throws -> Mach.MemoryManager
+```
+
+Gets the default memory manager for the host.
+
+---
+
+```swift
+public func setDefaultMemoryManager(to manager: Mach.MemoryManager) throws
+```
+
+Sets the default memory manager for the host.
+
+<ParamField path="manager" type="Mach.MemoryManager" required>
+  The memory manager to set
+</ParamField>
+
+**Warning:** Only the kernel task can set the default memory manager.
+
+## Reboot Options
+
+### Mach.HostRebootOption
+
+A reboot option.
+
+```swift
+public struct HostRebootOption
+```
+
+<ParamField path="halt" type="HostRebootOption">
+  Don't reboot, just halt
+</ParamField>
+
+<ParamField path="upsDelay" type="HostRebootOption">
+  Reboot after a delay (technically tells the kernel there was a UPS power failure)
+</ParamField>
+
+<ParamField path="debugger" type="HostRebootOption">
+  Don't actually reboot, just drop into debugger (only available on debug kernel builds)
+</ParamField>
+
+## Memory Manager
+
+### Mach.MemoryManager
+
+A memory manager.
+
+```swift
+public class MemoryManager: Mach.Port
+```
+
+The memory manager is responsible for handling page faults and managing virtual memory backing store.
+
+## Usage Example
+
+```swift
+import Mach
+
+// Get the current host
+let host = Mach.Host.current
+
+// Get kernel version
+let kernelVersion = try host.kernelVersion
+print("Kernel version: \(kernelVersion)")
+
+// Get boot info
+let bootInfo = try host.bootInfo
+print("Boot info: \(bootInfo)")
+
+// Get page size
+let pageSize = try host.pageSize
+print("Page size: \(pageSize) bytes")
+
+// Check if host port is privileged
+let isPrivileged = try host.isPrivileged
+print("Host port is privileged: \(isPrivileged)")
+
+// Get default memory manager
+let memoryManager = try host.getDefaultMemoryManager()
+print("Memory manager port: \(memoryManager.name)")
+
+// Note: Rebooting requires elevated privileges
+// try host.reboot(option: .halt)  // This would halt the system
+```
+
+## Host Info
+
+While not shown in the basic `Host` type, the host provides access to various system information through additional APIs in the Host directory, including:
+
+- **Host Info**: System-wide information like processor count, memory size, etc.
+- **Host Statistics**: CPU and memory statistics
+- **Host Special Ports**: Special ports like the host privileged port
+- **Kext Management**: Loading and managing kernel extensions
+- **Lock Group Info**: Information about kernel lock groups
+
+These APIs are typically accessed through flavored data managers similar to task and thread info.
+
+## Host Special Ports
+
+The host has special ports that provide access to various system services:
+
+- **Host Port**: The unprivileged host port
+- **Host Privileged Port**: The privileged host port (requires special entitlements)
+- **Host Security Port**: For security operations (obsolete in modern systems)
+- **Host Notification Port**: For system notifications (obsolete in modern systems)
+
+## System Integration
+
+### Getting Host from Task
+
+You can get the host port from any task:
+
+```swift
+let task = Mach.Task.current
+let hostPort = try task.hostPort
+
+// This is the same as:
+let host = Mach.Host.current
+```
+
+### Processor Information
+
+The host provides access to processor sets and individual processors, allowing you to:
+
+- Query the number of CPUs
+- Get per-processor statistics
+- Manage processor sets for scheduling control
+- Query processor availability and status
+
+```swift
+// Example of getting system info
+let host = Mach.Host.current
+
+// Host info would typically be accessed through a manager
+// similar to TaskInfoManager or ThreadInfoManager
+// (implementation depends on the specific info flavor)
+```

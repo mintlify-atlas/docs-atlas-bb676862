@@ -1,0 +1,251 @@
+---
+title: Security Considerations
+description: Important security considerations when using Kass for reverse-engineering and security research
+---
+
+## Purpose and Intended Use
+
+Kass is designed **exclusively for reverse-engineering and security research** on macOS. While the library provides powerful low-level access to the XNU kernel, it is not intended for production applications.
+
+<Warning>
+  **Never use Kass in production applications.** The library provides direct access to kernel-level operations that can compromise system stability and security if misused.
+</Warning>
+
+## Privilege Requirements
+
+Many Kass operations require elevated privileges or specific entitlements:
+
+### Task Port Access
+
+Accessing other processes requires special permissions:
+
+```swift
+import MachCore
+
+// Requires task_for_pid-allow entitlement or root privileges
+do {
+    let targetTask = try Mach.Task.forPID(1234)
+    // This will fail without proper permissions
+} catch MachError.failure {
+    print("Insufficient privileges to access task")
+}
+```
+
+<Note>
+  The `task_for_pid` API is restricted by System Integrity Protection (SIP) and requires either:
+  - Running with root privileges
+  - The `task_for_pid-allow` entitlement
+  - Disabling SIP (not recommended)
+</Note>
+
+### Debug Port Access
+
+Debug ports provide even more privileged access:
+
+```swift
+// Requires com.apple.security.cs.debugger entitlement
+let debugPort = try Mach.Task.debugPort(forPID: targetPID)
+```
+
+## Memory Safety
+
+Kass provides direct memory manipulation capabilities that bypass Swift's safety guarantees:
+
+### Virtual Memory Operations
+
+```swift
+let vm = Mach.Task.current.vm
+
+// Reading from arbitrary memory addresses
+var pointer: UnsafeRawPointer? = UnsafeRawPointer(bitPattern: 0x1000)
+do {
+    let data = try vm.read(from: pointer, size: 4096)
+    // This could crash if the address is invalid
+} catch MachError.invalidAddress {
+    print("Invalid memory address")
+}
+```
+
+<Warning>
+  **Always validate memory addresses** before reading or writing. Invalid addresses can cause:
+  - Process crashes
+  - Kernel panics (in extreme cases)
+  - Data corruption
+</Warning>
+
+### Protection Flags
+
+Respect memory protection flags to avoid security violations:
+
+```swift
+// Check region protection before modifying
+var regionPtr: UnsafeRawPointer? = someAddress
+let info = try vm.regionBasicInfo(&regionPtr)
+
+if info.protection & VM_PROT_WRITE == 0 {
+    // Attempting to write will fail
+    print("Region is not writable")
+}
+```
+
+## Port Rights Management
+
+Mach ports are kernel resources that must be carefully managed:
+
+```swift
+let port = try Mach.Port.allocate(inTask: .current, withRight: .receive)
+
+// Port rights create kernel references
+// Failing to deallocate causes resource leaks
+defer {
+    try? port.deallocate()
+}
+```
+
+<Tip>
+  Use Swift's `defer` statement to ensure ports are properly deallocated, even when errors occur.
+</Tip>
+
+## Code Injection Risks
+
+Kass includes shellcode and task injection capabilities:
+
+```swift
+import Shellcode
+
+// Thread injection can execute arbitrary code in target processes
+let shellcode = Shellcode.A64.nop()  // Example ARM64 instruction
+```
+
+<Warning>
+  **Code injection techniques should only be used in controlled research environments:**
+  - Never inject code into system processes
+  - Always have explicit consent when targeting applications
+  - Be aware of anti-debugging and anti-tampering mechanisms
+  - Code injection can trigger security software alerts
+</Warning>
+
+## System Integrity Protection (SIP)
+
+SIP restricts many kernel operations on modern macOS:
+
+- Cannot access system processes
+- Cannot modify system files
+- Cannot load unsigned kernel extensions
+
+```swift
+// Operations on system processes will fail with SIP enabled
+let systemTask = try? Mach.Task.forPID(1)  // launchd
+// This will fail with MachError.failure under SIP
+```
+
+<Note>
+  **Never instruct users to disable SIP** for your research tools. Instead, work within SIP's constraints or clearly document the security implications.
+</Note>
+
+## Thread Safety
+
+Many Mach operations are not thread-safe:
+
+```swift
+let task = Mach.Task.current
+
+// Multiple threads accessing task operations simultaneously
+DispatchQueue.concurrentPerform(iterations: 10) { i in
+    // This may cause race conditions
+    let threads = try? task.threads
+}
+```
+
+<Warning>
+  Serialize access to Mach objects from multiple threads using locks or dispatch queues.
+</Warning>
+
+## Kernel Panics
+
+Improper use of Kass can cause kernel panics:
+
+### High-Risk Operations
+
+1. **Wiring memory** without proper cleanup
+2. **Modifying critical task/thread state** while processes are running
+3. **Creating circular port references**
+4. **Exhausting kernel resources** (ports, memory entries)
+
+```swift
+// Dangerous: wiring large amounts of memory
+try vm.wire(
+    somePointer,
+    size: 1_000_000_000,  // 1GB - may exhaust wired memory
+    protection: [.read, .write]
+)
+```
+
+<Warning>
+  **Always test on non-critical systems first.** Keep backups and be prepared for system instability.
+</Warning>
+
+## Entitlements for Research Tools
+
+When building research tools with Kass, you'll need specific entitlements:
+
+```xml
+<!-- Entitlements.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- For debugging other processes -->
+    <key>com.apple.security.cs.debugger</key>
+    <true/>
+    
+    <!-- For getting task ports -->
+    <key>task_for_pid-allow</key>
+    <true/>
+    
+    <!-- Disable library validation for research -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>
+```
+
+<Note>
+  **Ad-hoc signed binaries** with these entitlements will not work. You need either:
+  - A paid Apple Developer account for code signing
+  - To run unsigned on SIP-disabled systems (development only)
+</Note>
+
+## Best Practices Summary
+
+1. **Never use in production** - Kass is for research only
+2. **Validate all input** - Memory addresses, port names, task IDs
+3. **Handle errors gracefully** - Kernel operations can fail in many ways
+4. **Clean up resources** - Deallocate ports, unwire memory, terminate threads
+5. **Test in isolated environments** - Use VMs or dedicated test machines
+6. **Document your research** - Keep detailed notes of your findings
+7. **Respect system boundaries** - Don't modify system processes or kernel state
+8. **Be aware of legal implications** - Ensure you have authorization for your research
+
+## Legal and Ethical Considerations
+
+<Warning>
+  **Important Legal Notice:**
+  - Only perform reverse-engineering on systems you own or have explicit permission to analyze
+  - Be aware of software license agreements and terms of service
+  - Never use Kass for malicious purposes
+  - Security research should be conducted ethically and responsibly
+  - Consider coordinated vulnerability disclosure when finding security issues
+</Warning>
+
+## Reporting Security Issues
+
+If you discover security vulnerabilities while using Kass:
+
+1. **Do not publicly disclose** without giving vendors time to patch
+2. **Follow responsible disclosure practices**
+3. **Document your findings** with reproducible steps
+4. **Contact vendors** through their security reporting channels
+5. **Consider bug bounty programs** if available
+
+For issues with Kass itself, [file an issue on GitHub](https://github.com/nmggithub/Kass/issues) or open a security advisory if the issue is sensitive.

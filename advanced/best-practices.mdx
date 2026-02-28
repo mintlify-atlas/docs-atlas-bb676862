@@ -1,0 +1,626 @@
+---
+title: Best Practices
+description: Best practices for safe and effective use of Kass in reverse-engineering and security research
+---
+
+## Resource Management
+
+Proper resource management is critical when working with kernel resources:
+
+### Port Lifecycle
+
+Always deallocate ports when finished:
+
+```swift
+import MachCore
+
+// Bad: Port leaked
+func badExample() throws {
+    let port = try Mach.Port.allocate(inTask: .current, withRight: .receive)
+    // Port is never deallocated - resource leak!
+}
+
+// Good: Port properly managed
+func goodExample() throws {
+    let port = try Mach.Port.allocate(inTask: .current, withRight: .receive)
+    defer {
+        try? port.deallocate()
+    }
+    
+    // Use port...
+}
+```
+
+<Tip>
+  Use Swift's `defer` statement to guarantee cleanup, even when errors occur.
+</Tip>
+
+### Task Suspension
+
+Always resume suspended tasks:
+
+```swift
+let task = try Mach.Task.forPID(targetPID)
+
+// Use suspend2/resume2 with tokens for safety
+let token = try task.suspend2()
+defer {
+    try? task.resume2(token: token)
+}
+
+// Perform operations on suspended task
+let threads = try task.threads
+```
+
+<Warning>
+  Failing to resume a task leaves it permanently frozen, requiring force termination.
+</Warning>
+
+### Memory Wiring
+
+Unwire memory after use:
+
+```swift
+let vm = task.vm
+let pointer = UnsafeRawPointer(bitPattern: 0x100000000)
+let size: mach_vm_size_t = 4096
+
+// Wire memory
+try vm.wire(pointer, size: size, protection: [.read, .write])
+defer {
+    // Unwire by setting protection to .none
+    try? vm.protect(pointer, size: size, setMaximum: false, protection: .none)
+}
+
+// Use wired memory...
+```
+
+## Error Handling
+
+### Graceful Degradation
+
+Design code to handle failures gracefully:
+
+```swift
+func analyzeProcess(pid: pid_t) {
+    // Try privileged access first
+    if let task = try? Mach.Task.forPID(pid) {
+        print("Got task port - full analysis available")
+        performFullAnalysis(task: task)
+    } else {
+        print("Limited access - falling back to public APIs")
+        performLimitedAnalysis(pid: pid)
+    }
+}
+
+func performFullAnalysis(task: Mach.Task) {
+    // Read memory, inspect threads, etc.
+    do {
+        let threads = try task.threads
+        print("Process has \(threads.count) threads")
+    } catch {
+        print("Could not enumerate threads: \(error)")
+    }
+}
+
+func performLimitedAnalysis(pid: pid_t) {
+    // Use proc_pidinfo and similar APIs
+    print("Using limited inspection for PID \(pid)")
+}
+```
+
+### Specific Error Handling
+
+Handle expected errors explicitly:
+
+```swift
+do {
+    let task = try Mach.Task.forPID(pid)
+    return task
+} catch MachError.failure {
+    // Expected: insufficient privileges
+    throw AnalysisError.insufficientPrivileges
+} catch MachError.invalidArgument {
+    // Expected: invalid PID
+    throw AnalysisError.processNotFound
+} catch {
+    // Unexpected error
+    print("Unexpected error: \(error)")
+    throw error
+}
+```
+
+## Memory Safety
+
+### Validate Addresses
+
+Always validate memory addresses before access:
+
+```swift
+func readMemorySafe(
+    vm: Mach.VirtualMemoryManager,
+    address: UInt64,
+    size: Int
+) -> Data? {
+    let pointer = UnsafeRawPointer(bitPattern: UInt(address))
+    
+    // Validate address is in mapped region
+    var regionPtr = pointer
+    guard let (info, regionSize) = try? vm.region(
+        &regionPtr,
+        flavor: .basic,
+        as: vm_region_basic_info_64.self
+    ) else {
+        print("Address 0x\(String(format: "%llx", address)) not mapped")
+        return nil
+    }
+    
+    // Check protection
+    guard info.protection & VM_PROT_READ != 0 else {
+        print("Address not readable")
+        return nil
+    }
+    
+    // Ensure read doesn't exceed region
+    let offset = UInt64(bitPattern: Int64(bitPattern: pointer)) - 
+                 UInt64(bitPattern: Int64(bitPattern: regionPtr))
+    guard offset + UInt64(size) <= regionSize else {
+        print("Read would exceed region boundary")
+        return nil
+    }
+    
+    // Safe to read
+    guard let buffer = try? vm.read(from: pointer, size: mach_vm_size_t(size)) else {
+        return nil
+    }
+    
+    return Data(buffer)
+}
+```
+
+### Pointer Lifecycle
+
+Manage unsafe pointer lifecycles carefully:
+
+```swift
+// Bad: Pointer escapes scope
+func badPointerUse() -> UnsafeRawPointer? {
+    var data = Data([0x01, 0x02, 0x03, 0x04])
+    return data.withUnsafeBytes { $0.baseAddress }
+    // Pointer is invalid after return!
+}
+
+// Good: Copy data if needed
+func goodPointerUse() -> Data {
+    let data = Data([0x01, 0x02, 0x03, 0x04])
+    return data  // Data is copied
+}
+
+// Good: Use pointer within scope
+func goodPointerUse2(vm: Mach.VirtualMemoryManager, address: UnsafeRawPointer?) throws {
+    let data = try vm.read(from: address, size: 4)
+    // Data is copied into buffer
+    processData(Data(data))
+}
+```
+
+## Thread Safety
+
+### Serialize Mach Operations
+
+Mach operations are not thread-safe:
+
+```swift
+class TaskAnalyzer {
+    private let task: Mach.Task
+    private let queue = DispatchQueue(label: "com.example.taskanalyzer")
+    
+    init(task: Mach.Task) {
+        self.task = task
+    }
+    
+    func getThreadCount() throws -> Int {
+        try queue.sync {
+            try task.threads.count
+        }
+    }
+    
+    func getMemoryInfo() throws -> mach_task_basic_info {
+        try queue.sync {
+            try task.info.basic
+        }
+    }
+}
+```
+
+<Note>
+  Use a serial dispatch queue to serialize access to Mach objects from multiple threads.
+</Note>
+
+### Thread-Local State
+
+Be careful with thread-local state:
+
+```swift
+// Thread-specific data access
+let thread = Mach.Thread.current
+
+// TSD address is thread-specific
+if let tsdAddress = thread.tsdAddress {
+    print("Thread-specific data at: \(tsdAddress)")
+}
+
+// Don't access another thread's TSD without synchronization
+```
+
+## Performance Optimization
+
+### Batch Operations
+
+Batch operations when possible:
+
+```swift
+// Bad: Multiple kernel calls
+for pid in processIDs {
+    if let task = try? Mach.Task.forPID(pid) {
+        let threads = try? task.threads
+        // Process each individually
+    }
+}
+
+// Better: Collect first, then process
+let tasks = processIDs.compactMap { try? Mach.Task.forPID($0) }
+let allThreads = tasks.flatMap { (try? $0.threads) ?? [] }
+// Process in batch
+```
+
+### Avoid Repeated Queries
+
+Cache frequently accessed information:
+
+```swift
+class ProcessInfo {
+    private let task: Mach.Task
+    private var cachedThreads: [Mach.Thread]?
+    private var cacheTime: Date?
+    private let cacheTimeout: TimeInterval = 1.0
+    
+    var threads: [Mach.Thread] {
+        get throws {
+            if let cached = cachedThreads,
+               let time = cacheTime,
+               Date().timeIntervalSince(time) < cacheTimeout {
+                return cached
+            }
+            
+            let threads = try task.threads
+            cachedThreads = threads
+            cacheTime = Date()
+            return threads
+        }
+    }
+}
+```
+
+<Warning>
+  Be careful with caching - process state changes frequently. Balance performance with accuracy.
+</Warning>
+
+### Minimize Memory Copies
+
+Work with buffers directly when possible:
+
+```swift
+// Bad: Multiple copies
+let buffer = try vm.read(from: address, size: 1024)
+let data = Data(buffer)
+let array = Array(data)
+
+// Good: Work with buffer directly
+let buffer = try vm.read(from: address, size: 1024)
+buffer.withUnsafeBytes { bytes in
+    // Process bytes directly
+    processBytes(bytes)
+}
+```
+
+## Code Organization
+
+### Abstraction Layers
+
+Create abstractions for common patterns:
+
+```swift
+struct ProcessMemoryReader {
+    let vm: Mach.VirtualMemoryManager
+    
+    func read<T: BitwiseCopyable>(at address: UInt64) throws -> T {
+        let pointer = UnsafeRawPointer(bitPattern: UInt(address))
+        return try vm.read(from: pointer)
+    }
+    
+    func readString(at address: UInt64, maxLength: Int = 256) throws -> String? {
+        let pointer = UnsafePointer<Int8>(bitPattern: UInt(address))
+        return try vm.readNullTerminatedString(
+            from: pointer!,
+            encoding: .utf8
+        )
+    }
+    
+    func readBuffer(at address: UInt64, size: Int) throws -> Data {
+        let pointer = UnsafeRawPointer(bitPattern: UInt(address))
+        let buffer = try vm.read(from: pointer, size: mach_vm_size_t(size))
+        return Data(buffer)
+    }
+}
+
+// Usage
+let reader = ProcessMemoryReader(vm: task.vm)
+let value: UInt64 = try reader.read(at: 0x100000000)
+let name = try reader.readString(at: 0x100001000)
+```
+
+### Error Wrapping
+
+Define domain-specific errors:
+
+```swift
+enum ProcessAnalysisError: Error {
+    case processNotFound(pid: pid_t)
+    case insufficientPrivileges
+    case invalidMemoryAddress(UInt64)
+    case threadOperationFailed(String)
+    case protectionViolation
+}
+
+func analyzeThread(_ thread: Mach.Thread) throws {
+    do {
+        let state = try thread.getState(
+            Mach.ThreadState<arm_thread_state64_t>.self
+        )
+        // Analyze state...
+    } catch MachError.invalidArgument {
+        throw ProcessAnalysisError.threadOperationFailed(
+            "Invalid thread state flavor"
+        )
+    } catch {
+        throw ProcessAnalysisError.threadOperationFailed(
+            error.localizedDescription
+        )
+    }
+}
+```
+
+## Testing Strategies
+
+### Unit Testing
+
+Test your abstractions with mock objects:
+
+```swift
+import XCTest
+
+protocol MemoryReaderProtocol {
+    func read(at address: UInt64, size: Int) throws -> Data
+}
+
+class MockMemoryReader: MemoryReaderProtocol {
+    var mockData: [UInt64: Data] = [:]
+    
+    func read(at address: UInt64, size: Int) throws -> Data {
+        guard let data = mockData[address] else {
+            throw ProcessAnalysisError.invalidMemoryAddress(address)
+        }
+        return data
+    }
+}
+
+class ProcessAnalyzerTests: XCTestCase {
+    func testMemoryRead() throws {
+        let mock = MockMemoryReader()
+        mock.mockData[0x100000000] = Data([0x01, 0x02, 0x03, 0x04])
+        
+        let data = try mock.read(at: 0x100000000, size: 4)
+        XCTAssertEqual(data, Data([0x01, 0x02, 0x03, 0x04]))
+    }
+}
+```
+
+### Integration Testing
+
+Test with actual processes in controlled environments:
+
+```swift
+// Test helper process
+func testWithHelperProcess() throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    process.arguments = ["10"]
+    
+    try process.run()
+    defer { process.terminate() }
+    
+    let task = try Mach.Task.forPID(process.processIdentifier)
+    
+    // Test operations on helper process
+    let threads = try task.threads
+    XCTAssertGreaterThan(threads.count, 0)
+}
+```
+
+<Note>
+  Always use helper processes or VMs for testing. Never test on system processes or critical applications.
+</Note>
+
+## Documentation
+
+### Document Assumptions
+
+Clearly document assumptions in your code:
+
+```swift
+/// Reads a null-terminated string from process memory.
+///
+/// - Parameters:
+///   - address: Memory address to read from
+///   - maxLength: Maximum string length (default: 1024)
+/// - Returns: The null-terminated string, or nil if invalid
+///
+/// - Important: Assumes address points to valid, readable memory.
+/// - Warning: Will read up to maxLength bytes. Use appropriate limits.
+/// - Throws: `MachError.invalidAddress` if address is not mapped
+///
+/// ## Example
+/// ```swift
+/// let name = try readString(at: 0x100001000, maxLength: 256)
+/// ```
+func readString(at address: UInt64, maxLength: Int = 1024) throws -> String? {
+    // Implementation...
+}
+```
+
+### Code Comments
+
+Comment complex kernel interactions:
+
+```swift
+// Suspend the task to get consistent thread state.
+// Without suspension, threads may be created/destroyed during enumeration.
+let token = try task.suspend2()
+defer { try? task.resume2(token: token) }
+
+// Enumerate threads while task is frozen
+let threads = try task.threads
+
+// Get state for each thread
+// Note: Thread state structures are architecture-specific
+for thread in threads {
+    #if arch(arm64)
+    let state = try thread.getState(Mach.ThreadState<arm_thread_state64_t>.self)
+    print("PC: 0x\(String(format: "%016llx", state.data.__pc))")
+    #elseif arch(x86_64)
+    let state = try thread.getState(Mach.ThreadState<x86_thread_state64_t>.self)
+    print("RIP: 0x\(String(format: "%016llx", state.data.__rip))")
+    #endif
+}
+```
+
+## Architectural Considerations
+
+### Architecture-Specific Code
+
+Handle multiple architectures gracefully:
+
+```swift
+enum Architecture {
+    case arm64
+    case x86_64
+    case unknown
+    
+    static var current: Architecture {
+        #if arch(arm64)
+        return .arm64
+        #elseif arch(x86_64)
+        return .x86_64
+        #else
+        return .unknown
+        #endif
+    }
+}
+
+func getInstructionPointer(from thread: Mach.Thread) throws -> UInt64 {
+    switch Architecture.current {
+    case .arm64:
+        let state = try thread.getState(
+            Mach.ThreadState<arm_thread_state64_t>.self
+        )
+        return state.data.__pc
+        
+    case .x86_64:
+        let state = try thread.getState(
+            Mach.ThreadState<x86_thread_state64_t>.self
+        )
+        return state.data.__rip
+        
+    case .unknown:
+        throw ProcessAnalysisError.threadOperationFailed(
+            "Unsupported architecture"
+        )
+    }
+}
+```
+
+### Version Compatibility
+
+Check API availability:
+
+```swift
+func suspendTask(_ task: Mach.Task) throws -> Any? {
+    if #available(macOS 11.3, *) {
+        // Use suspend2 on newer systems
+        let token = try task.suspend2()
+        return token
+    } else {
+        // Fall back to suspend on older systems
+        try task.suspend()
+        return nil
+    }
+}
+
+func resumeTask(_ task: Mach.Task, token: Any?) throws {
+    if #available(macOS 11.3, *), let token = token as? Mach.TaskSuspensionToken {
+        try task.resume2(token: token)
+    } else {
+        try task.resume()
+    }
+}
+```
+
+## Summary
+
+Key best practices for using Kass:
+
+1. **Resource Management**
+   - Always deallocate ports
+   - Resume suspended tasks
+   - Unwire memory after use
+   - Use `defer` for guaranteed cleanup
+
+2. **Error Handling**
+   - Handle expected errors explicitly
+   - Provide graceful degradation
+   - Create domain-specific error types
+   - Log errors comprehensively
+
+3. **Memory Safety**
+   - Validate all addresses before access
+   - Check region protection
+   - Manage pointer lifecycles carefully
+   - Avoid pointer escaping
+
+4. **Thread Safety**
+   - Serialize Mach operations
+   - Use dispatch queues for synchronization
+   - Be careful with thread-local state
+
+5. **Performance**
+   - Batch operations when possible
+   - Cache appropriately
+   - Minimize memory copies
+   - Avoid repeated kernel calls
+
+6. **Code Quality**
+   - Create abstraction layers
+   - Document assumptions
+   - Test thoroughly
+   - Handle multiple architectures
+
+7. **Safety**
+   - Test in isolated environments
+   - Never use in production
+   - Be aware of kernel panic risks
+   - Follow responsible disclosure
+
+<Tip>
+  When in doubt, refer to the [XNU source code](https://github.com/apple-oss-distributions/xnu) to understand kernel behavior and constraints.
+</Tip>

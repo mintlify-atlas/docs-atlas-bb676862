@@ -1,0 +1,485 @@
+---
+title: Virtual Memory API
+description: API reference for Mach virtual memory operations, allocation, and protection in the Kass Swift library
+---
+
+# Virtual Memory API
+
+The Virtual Memory API provides Swift-friendly access to Mach virtual memory operations, including allocation, deallocation, protection, and reading/writing memory.
+
+## Core Types
+
+### Mach.VirtualMemoryManager
+
+A virtual memory manager.
+
+```swift
+public struct VirtualMemoryManager
+```
+
+<ResponseField name="task" type="Mach.Task">
+  The task this manager is managing virtual memory for
+</ResponseField>
+
+#### Initializer
+
+```swift
+public init(task: Mach.Task)
+```
+
+Creates a new virtual memory manager.
+
+<ParamField path="task" type="Mach.Task" required>
+  The task to manage virtual memory for
+</ParamField>
+
+**Warning:** In some rare cases, the functions in this structure may simulate a kernel error. Please see the source code for more information.
+
+### Accessing the VM Manager
+
+The virtual memory manager is accessed through the `vm` property on tasks:
+
+```swift
+extension Mach.Task {
+    public var vm: Mach.VirtualMemoryManager
+}
+```
+
+## Allocation and Deallocation
+
+### Methods
+
+```swift
+public func allocate(
+    _ pointer: inout UnsafeRawPointer?,
+    size: mach_vm_size_t,
+    flags: Mach.VMFlags = []
+) throws
+```
+
+Allocates a new virtual memory region in the task's address space.
+
+<ParamField path="pointer" type="inout UnsafeRawPointer?" required>
+  Pointer to allocate at (modified with actual address). Pass `nil` to let the kernel choose.
+</ParamField>
+
+<ParamField path="size" type="mach_vm_size_t" required>
+  Size of the region to allocate in bytes
+</ParamField>
+
+<ParamField path="flags" type="Mach.VMFlags" default="[]">
+  Allocation flags
+</ParamField>
+
+---
+
+```swift
+public func deallocate(
+    _ pointer: UnsafeRawPointer?,
+    size: mach_vm_size_t
+) throws
+```
+
+Deallocates a virtual memory region in the task's address space.
+
+<ParamField path="pointer" type="UnsafeRawPointer?" required>
+  Pointer to the region to deallocate
+</ParamField>
+
+<ParamField path="size" type="mach_vm_size_t" required>
+  Size of the region to deallocate in bytes
+</ParamField>
+
+## VM Flags
+
+### Mach.VMFlags
+
+Flags for virtual memory operations.
+
+```swift
+public struct VMFlags: OptionSet
+```
+
+<ParamField path="fixed" type="VMFlags">
+  Allocate at the exact address specified (overridden by `.anywhere`)
+</ParamField>
+
+<ParamField path="anywhere" type="VMFlags">
+  Allocate anywhere in the address space
+</ParamField>
+
+<ParamField path="purgable" type="VMFlags">
+  Mark the memory as purgeable (can be reclaimed by kernel under memory pressure)
+</ParamField>
+
+<ParamField path="fourGBChunk" type="VMFlags">
+  Allocate in a 4GB chunk
+</ParamField>
+
+<ParamField path="randomAddress" type="VMFlags">
+  Allocate at a random address (ASLR)
+</ParamField>
+
+<ParamField path="noCache" type="VMFlags">
+  Don't cache the memory
+</ParamField>
+
+<ParamField path="resilientCodesign" type="VMFlags">
+  Resilient code signing
+</ParamField>
+
+<ParamField path="resilientMedia" type="VMFlags">
+  Resilient media
+</ParamField>
+
+<ParamField path="permanent" type="VMFlags">
+  Make the allocation permanent
+</ParamField>
+
+<ParamField path="trpo" type="VMFlags">
+  TPRO (Tested Protection) flag
+</ParamField>
+
+<ParamField path="overwrite" type="VMFlags">
+  Overwrite existing mappings
+</ParamField>
+
+<ParamField path="superpageMask" type="VMFlags">
+  Superpage mask
+</ParamField>
+
+<ParamField path="returnDataAddress" type="VMFlags">
+  Return data address
+</ParamField>
+
+<ParamField path="return4kDataAddress" type="VMFlags">
+  Return 4K data address
+</ParamField>
+
+## Protection and Inheritance
+
+### Methods
+
+```swift
+public func protect(
+    _ pointer: UnsafeRawPointer?,
+    size: mach_vm_size_t,
+    setMaximum: Bool,
+    protection: Mach.VMProtectionOptions
+) throws
+```
+
+Sets the protection of a virtual memory region in the task's address space.
+
+<ParamField path="pointer" type="UnsafeRawPointer?" required>
+  Pointer to the region to protect
+</ParamField>
+
+<ParamField path="size" type="mach_vm_size_t" required>
+  Size of the region in bytes
+</ParamField>
+
+<ParamField path="setMaximum" type="Bool" required>
+  Whether to set the maximum protection (vs. current protection)
+</ParamField>
+
+<ParamField path="protection" type="Mach.VMProtectionOptions" required>
+  Protection options to apply
+</ParamField>
+
+---
+
+```swift
+public func inherit(
+    _ pointer: UnsafeRawPointer?,
+    size: mach_vm_size_t,
+    inherit: Mach.VMInherit
+) throws
+```
+
+Sets the inheritance of a virtual memory region in the task's address space.
+
+<ParamField path="pointer" type="UnsafeRawPointer?" required>
+  Pointer to the region
+</ParamField>
+
+<ParamField path="size" type="mach_vm_size_t" required>
+  Size of the region in bytes
+</ParamField>
+
+<ParamField path="inherit" type="Mach.VMInherit" required>
+  Inheritance option
+</ParamField>
+
+### Mach.VMProtectionOptions
+
+Protection options for virtual memory.
+
+```swift
+public struct VMProtectionOptions: OptionSet
+```
+
+<ParamField path="none" type="VMProtectionOptions">
+  No access allowed
+</ParamField>
+
+<ParamField path="read" type="VMProtectionOptions">
+  Read access allowed
+</ParamField>
+
+<ParamField path="write" type="VMProtectionOptions">
+  Write access allowed
+</ParamField>
+
+<ParamField path="execute" type="VMProtectionOptions">
+  Execute access allowed
+</ParamField>
+
+### Mach.VMInherit
+
+An option for inheriting virtual memory.
+
+```swift
+public struct VMInherit
+```
+
+<ParamField path="share" type="VMInherit">
+  Share the memory with child processes
+</ParamField>
+
+<ParamField path="copy" type="VMInherit">
+  Copy the memory to child processes
+</ParamField>
+
+<ParamField path="none" type="VMInherit">
+  Don't inherit (child gets new pages)
+</ParamField>
+
+<ParamField path="donateCopy" type="VMInherit">
+  Donate copy (Warning: This is an invalid inheritance option, but included for completeness)
+</ParamField>
+
+## Reading and Writing Memory
+
+### Methods
+
+```swift
+public func read(
+    from inPointer: UnsafeRawPointer?,
+    size: mach_vm_size_t,
+    into outPointer: UnsafeMutableRawPointer? = nil
+) throws -> UnsafeRawBufferPointer
+```
+
+Reads the contents of a virtual memory region in the task's address space into a new (potentially-specified) address in the current task's address space.
+
+<ParamField path="inPointer" type="UnsafeRawPointer?" required>
+  Pointer to read from in the target task
+</ParamField>
+
+<ParamField path="size" type="mach_vm_size_t" required>
+  Size to read in bytes
+</ParamField>
+
+<ParamField path="outPointer" type="UnsafeMutableRawPointer?" default="nil">
+  Optional destination pointer. If nil, kernel allocates new memory.
+</ParamField>
+
+**Returns:** Buffer containing the read data.
+
+---
+
+```swift
+public func read<T: BitwiseCopyable>(from inPointer: UnsafePointer<T>?) throws -> T
+```
+
+Reads a value from a virtual memory region in the task's address space.
+
+<ParamField path="inPointer" type="UnsafePointer<T>?" required>
+  Pointer to read from
+</ParamField>
+
+**Returns:** The value read from memory.
+
+---
+
+```swift
+public func write(
+    to pointer: UnsafeRawPointer?,
+    from buffer: UnsafeRawBufferPointer
+) throws
+```
+
+Writes the contents of a buffer into a virtual memory region in the task's address space.
+
+<ParamField path="pointer" type="UnsafeRawPointer?" required>
+  Destination pointer in the target task
+</ParamField>
+
+<ParamField path="buffer" type="UnsafeRawBufferPointer" required>
+  Buffer containing data to write
+</ParamField>
+
+---
+
+```swift
+public func write<T: BitwiseCopyable>(
+    _ value: T,
+    to pointer: UnsafeMutablePointer<T>?
+) throws
+```
+
+Writes a value into a virtual memory region in the task's address space.
+
+<ParamField path="value" type="T" required>
+  Value to write
+</ParamField>
+
+<ParamField path="pointer" type="UnsafeMutablePointer<T>?" required>
+  Destination pointer in the target task
+</ParamField>
+
+## Usage Example
+
+```swift
+import Mach
+
+// Get the VM manager for the current task
+let task = Mach.Task.current
+let vm = task.vm
+
+// Allocate memory
+var pointer: UnsafeRawPointer? = nil
+let size = mach_vm_size_t(4096)  // One page
+try vm.allocate(&pointer, size: size, flags: [.anywhere])
+defer {
+    try? vm.deallocate(pointer, size: size)
+}
+
+print("Allocated at: \(pointer!)")
+
+// Protect the memory (make it read-write)
+try vm.protect(
+    pointer,
+    size: size,
+    setMaximum: false,
+    protection: [.read, .write]
+)
+
+// Write data to the memory
+let data = "Hello, Mach VM!".data(using: .utf8)!
+data.withUnsafeBytes { buffer in
+    try vm.write(to: pointer, from: buffer)
+}
+
+// Read the data back
+let readBuffer = try vm.read(
+    from: pointer,
+    size: mach_vm_size_t(data.count)
+)
+let readData = Data(bytes: readBuffer.baseAddress!, count: readBuffer.count)
+let readString = String(data: readData, encoding: .utf8)
+print("Read back: \(readString!)")
+
+// Type-safe read/write
+var intValue: Int = 42
+let intPointer = UnsafeMutablePointer<Int>.allocate(capacity: 1)
+defer { intPointer.deallocate() }
+intPointer.pointee = intValue
+
+// Read an Int value
+let readInt: Int = try vm.read(from: intPointer)
+print("Read int: \(readInt)")
+
+// Write an Int value
+try vm.write(123, to: intPointer)
+print("Wrote: \(intPointer.pointee)")
+```
+
+## Advanced Usage
+
+### Remote Process Memory Access
+
+```swift
+import Mach
+
+// Get a task port for another process (requires proper entitlements)
+let targetPID: pid_t = /* ... */
+let targetTask = try Mach.Task(forPID: targetPID)
+let targetVM = targetTask.vm
+
+// Read from the target process
+let remoteAddress: UnsafeRawPointer? = /* ... */
+let remoteData = try targetVM.read(
+    from: remoteAddress,
+    size: 1024
+)
+
+// Write to the target process (requires proper entitlements)
+let dataToWrite = Data([0x90, 0x90, 0x90])  // NOP instructions
+dataToWrite.withUnsafeBytes { buffer in
+    try targetVM.write(to: remoteAddress, from: buffer)
+}
+```
+
+### Memory Protection Changes
+
+```swift
+let vm = Mach.Task.current.vm
+
+// Allocate executable memory
+var execPointer: UnsafeRawPointer? = nil
+try vm.allocate(&execPointer, size: 4096, flags: [.anywhere])
+defer { try? vm.deallocate(execPointer, size: 4096) }
+
+// Initially make it read-write
+try vm.protect(
+    execPointer,
+    size: 4096,
+    setMaximum: false,
+    protection: [.read, .write]
+)
+
+// Write code to it
+// ... write machine code ...
+
+// Make it read-execute (remove write permission)
+try vm.protect(
+    execPointer,
+    size: 4096,
+    setMaximum: false,
+    protection: [.read, .execute]
+)
+```
+
+### Inheritance Options
+
+```swift
+let vm = Mach.Task.current.vm
+var pointer: UnsafeRawPointer? = nil
+try vm.allocate(&pointer, size: 4096, flags: [.anywhere])
+
+// Set memory to be shared with child processes
+try vm.inherit(
+    pointer,
+    size: 4096,
+    inherit: .share
+)
+
+// Now when forking, child will share this memory
+// (Changes in parent visible to child and vice versa)
+```
+
+## Platform Notes
+
+**macOS Only:** The Virtual Memory API is only available on macOS.
+
+```swift
+#if os(macOS)
+// VM operations here
+#endif
+```
+
+## Memory Tags
+
+The Virtual Memory API also includes support for VM tags, which help identify different types of memory allocations. These are defined in the `VMTags.swift` source file and provide descriptive tags for memory regions.

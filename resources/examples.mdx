@@ -1,0 +1,352 @@
+---
+title: Usage Examples
+description: Practical examples demonstrating common use cases and patterns for the Kass Swift library
+---
+
+This page provides real-world examples of using Kass for macOS kernel interaction, reverse-engineering, and security research.
+
+## Getting Started
+
+### Basic Task Operations
+
+Working with Mach tasks is fundamental to kernel interaction:
+
+<CodeGroup>
+```swift Get Current Task
+import MachCore
+
+// Get the current task
+let currentTask = Mach.Task.current
+print("Current task: \(currentTask)")
+
+// Get the process ID
+let pid = try currentTask.pid
+print("PID: \(pid)")
+```
+
+```swift Suspend and Resume
+import MachCore
+
+let task = Mach.Task.current
+
+// Suspend the task
+try task.suspend()
+
+// Resume the task
+try task.resume()
+
+// Using suspension tokens (modern API)
+let token = try task.suspend2()
+try task.resume2(token: token)
+```
+
+```swift Enumerate Threads
+import MachCore
+
+let task = Mach.Task.current
+
+// Get all threads in the task
+let threads = try task.threads
+print("Found \(threads.count) threads")
+
+for thread in threads {
+    print("Thread: \(thread)")
+}
+```
+</CodeGroup>
+
+## Port Management
+
+Mach ports are central to IPC and kernel communication:
+
+<Steps>
+  <Step title="Create a port">
+    ```swift
+    import MachCore
+    
+    // Allocate a new port
+    let port = try Mach.Port.allocate(inTask: .current, right: .receive)
+    print("Port name: 0x\(String(format: "%08x", port.name))")
+    ```
+  </Step>
+  
+  <Step title="Guard the port">
+    ```swift
+    // Guard a port to protect against accidental destruction
+    let guardContext = mach_port_context_t(arc4random())
+    try port.guard(with: guardContext, flags: [.strict, .immovableReceive])
+    
+    // Later, unguard it
+    try port.unguard(with: guardContext)
+    ```
+  </Step>
+  
+  <Step title="Query port rights">
+    ```swift
+    // Check what rights the port name has
+    let rights = try port.rights
+    
+    if rights.contains(.receive) {
+        print("Has receive right")
+    }
+    if rights.contains(.send) {
+        print("Has send right")
+    }
+    ```
+  </Step>
+</Steps>
+
+## Virtual Memory Operations
+
+The `VirtualMemoryManager` provides safe wrappers around Mach VM APIs:
+
+<CodeGroup>
+```swift Allocate Memory
+import MachCore
+
+let task = Mach.Task.current
+let vm = task.vm
+
+// Allocate memory
+var pointer: UnsafeRawPointer? = nil
+let size: mach_vm_size_t = 4096
+try vm.allocate(&pointer, size: size, flags: .anywhere)
+
+print("Allocated at: \(pointer!)")
+
+// Deallocate when done
+try vm.deallocate(pointer, size: size)
+```
+
+```swift Read/Write Memory
+import MachCore
+
+let vm = Mach.Task.current.vm
+
+// Write a value
+var value: UInt64 = 0xdeadbeef
+let pointer = UnsafeMutablePointer<UInt64>.allocate(capacity: 1)
+try vm.write(value, to: pointer)
+
+// Read it back
+let readValue: UInt64 = try vm.read(from: pointer)
+print("Read value: 0x\(String(format: "%llx", readValue))")
+
+pointer.deallocate()
+```
+
+```swift Memory Protection
+import MachCore
+
+let vm = Mach.Task.current.vm
+var pointer: UnsafeRawPointer? = nil
+try vm.allocate(&pointer, size: 4096, flags: .anywhere)
+
+// Change protection to read-only
+try vm.protect(
+    pointer,
+    size: 4096,
+    setMaximum: false,
+    protection: .read
+)
+
+// Get region info
+var regionPointer = pointer
+let info = try vm.regionBasicInfo(&regionPointer)
+print("Protection: \(info.protection)")
+```
+
+```swift Read String from Memory
+import MachCore
+
+let vm = Mach.Task.current.vm
+
+// Read a null-terminated string from a pointer
+let stringPointer = UnsafePointer<Int8>(bitPattern: 0x1000)!
+if let string = try vm.readNullTerminatedString(
+    from: stringPointer,
+    encoding: .utf8
+) {
+    print("String: \(string)")
+}
+```
+</CodeGroup>
+
+## Host and System Information
+
+Query system-level information:
+
+```swift Host Information
+import MachCore
+
+let host = Mach.Host.current
+
+// Get kernel version
+let kernelVersion = try host.kernelVersion
+print("Kernel: \(kernelVersion)")
+
+// Get boot info
+let bootInfo = try host.bootInfo
+print("Boot info: \(bootInfo)")
+
+// Get page size
+let pageSize = try host.pageSize
+print("Page size: \(pageSize) bytes")
+
+// Check if privileged
+let isPrivileged = try host.isPrivileged
+print("Privileged: \(isPrivileged)")
+```
+
+## Thread Management
+
+<CodeGroup>
+```swift Create Thread
+import MachCore
+
+let task = Mach.Task.current
+
+// Create a new thread
+let thread = try Mach.Thread(inTask: task)
+print("Created thread: \(thread)")
+
+// Thread operations
+try thread.suspend()
+try thread.resume()
+try thread.terminate()
+```
+
+```swift Thread Switching
+import MachCore
+
+let currentThread = Mach.Thread.current
+
+// Switch to another thread with timeout
+try Mach.Thread.switch(
+    to: currentThread,
+    option: .none,
+    timeout: 100
+)
+
+// Abort thread depression
+try currentThread.abortDepression()
+```
+
+```swift Wire Thread
+import MachCore
+
+let thread = Mach.Thread.current
+
+// Wire thread to prevent paging
+try thread.wire()
+
+// Unwire when done
+try thread.unwire()
+```
+</CodeGroup>
+
+## Dynamic Linking
+
+The `Linking` module provides dynamic symbol resolution:
+
+<CodeGroup>
+```swift Load Framework
+import Linking
+
+// Load a public framework
+if let foundation = Framework("Foundation") {
+    foundation.link()
+    print("Loaded Foundation")
+}
+
+// Load a private framework
+if let privateFramework = Framework("IOKit", isPrivate: true) {
+    privateFramework.link()
+}
+```
+
+```swift Get Symbol
+import Linking
+
+if let libSystem = Library(path: "/usr/lib/libSystem.B.dylib") {
+    // Get a function symbol
+    if let symbol = libSystem.get(symbol: "malloc") {
+        typealias MallocFunc = @convention(c) (Int) -> UnsafeMutableRawPointer?
+        let malloc: MallocFunc = symbol.cast()
+        
+        let ptr = malloc(1024)
+        print("Allocated: \(ptr!)")
+    }
+}
+```
+
+```swift Get Objective-C Class
+import Linking
+
+if let foundation = Framework("Foundation") {
+    if let nsStringClass = foundation.get(objCClass: "NSString") {
+        print("Got NSString class: \(nsStringClass)")
+    }
+}
+```
+</CodeGroup>
+
+## Advanced: Task Inspection
+
+Inspect task properties and special ports:
+
+```swift Task Inspection
+import MachCore
+
+let task = Mach.Task.current
+
+// Get task role
+let role = try task.role
+print("Task role: \(role)")
+
+// Get all ports in task namespace
+let ports = try task.ports
+print("Found \(ports.count) ports")
+
+// Get namespace info
+let nsInfo = try task.nameSpaceInfo
+print("IPC space size: \(nsInfo.iis_table_size)")
+
+// Get stashed ports
+let stashedPorts = try task.stashedPorts
+print("Stashed ports: \(stashedPorts.count)")
+```
+
+## Error Handling
+
+All Kass functions that can fail throw errors:
+
+```swift Error Handling
+import MachCore
+
+do {
+    let task = Mach.Task.current
+    try task.suspend()
+    // ... do work ...
+    try task.resume()
+} catch let error as MachError {
+    print("Mach error: \(error)")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+<Note>
+Most Kass operations require elevated privileges or specific entitlements. Ensure your application has the necessary permissions before attempting privileged operations.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="book" href="https://swiftpackageindex.com/nmggithub/Kass/main/documentation/kass/">
+    Explore the complete API documentation
+  </Card>
+  <Card title="Contributing" icon="code" href="/resources/contributing">
+    Learn how to contribute to Kass
+  </Card>
+</CardGroup>

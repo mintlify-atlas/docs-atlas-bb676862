@@ -1,0 +1,703 @@
+---
+title: Kernel Interaction Patterns
+description: Best practices and patterns for safe and effective XNU kernel interaction
+---
+
+## Overview
+
+Interacting with the kernel requires careful attention to error handling, memory safety, and security. Kass provides safe abstractions while maintaining low-level control.
+
+## Error Handling
+
+### Mach Error Handling
+
+All Mach kernel calls return a `kern_return_t` status code. Kass wraps these in Swift's native error handling:
+
+```swift
+import MachCore
+
+// The Mach.call() wrapper converts kern_return_t to MachError
+try Mach.call(task_suspend(taskPort))
+
+// Typed error catching
+do {
+    try Mach.call(mach_port_allocate(task, MACH_PORT_RIGHT_RECEIVE, &port))
+} catch MachError.invalidArgument {
+    print("Invalid argument passed to kernel")
+} catch MachError.noSpace {
+    print("No space available in name space")
+} catch let error as MachError {
+    print("Mach error: \(error.code)")
+}
+```
+
+<Info>
+MachError provides typed error codes matching the kern_return_t values from the XNU kernel.
+</Info>
+
+### BSD Error Handling
+
+BSD syscalls use errno-based error reporting:
+
+```swift
+import BSDCore
+
+// BSD.call() converts errno to POSIXError
+do {
+    try BSD.call(open("/path/to/file", O_RDONLY))
+} catch POSIXError.ENOENT {
+    print("File does not exist")
+} catch POSIXError.EACCES {
+    print("Permission denied")
+} catch POSIXError.EPERM {
+    print("Operation not permitted (requires root?)")
+} catch let error as POSIXError {
+    print("POSIX error \(error.code): \(error.localizedDescription)")
+}
+```
+
+### Common Error Codes
+
+<Tabs>
+  <Tab title="Mach Errors">
+    ```swift
+    // Common MachError codes
+    switch error as? MachError {
+    case .invalidArgument:
+        // Bad parameter passed to kernel call
+        break
+    case .invalidName:
+        // Port name doesn't exist in namespace
+        break
+    case .invalidRight:
+        // Don't have the required right for operation
+        break
+    case .invalidTask:
+        // Task port is invalid or dead
+        break
+    case .noSpace:
+        // No space in port namespace
+        break
+    case .failure:
+        // Generic failure
+        break
+    default:
+        break
+    }
+    ```
+  </Tab>
+  <Tab title="POSIX Errors">
+    ```swift
+    // Common POSIXError codes
+    switch error as? POSIXError {
+    case .EPERM:
+        // Operation not permitted (privilege issue)
+        break
+    case .ENOENT:
+        // No such file or directory
+        break
+    case .ESRCH:
+        // No such process
+        break
+    case .EINVAL:
+        // Invalid argument
+        break
+    case .EACCES:
+        // Permission denied
+        break
+    default:
+        break
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Message Passing
+
+### Sending Messages
+
+Mach IPC uses message passing as its fundamental communication primitive:
+
+```swift
+import MachCore
+
+// Create a message
+let message = Mach.Message()
+
+// Set message properties via header
+message.header.remotePort = destinationPort
+message.header.bits.remotePortDisposition = .send
+
+// Send the message
+try Mach.Message.send(
+    message,
+    to: destinationPort,
+    options: [],
+    timeout: MACH_MSG_TIMEOUT_NONE
+)
+```
+
+<Warning>
+Sending to an invalid or deallocated port can cause kernel panics in extreme cases. Always validate port names before use.
+</Warning>
+
+### Receiving Messages
+
+Receiving blocks until a message arrives:
+
+```swift
+import MachCore
+
+// Receive from a port (blocks)
+let received = try Mach.Message.receive(
+    Mach.Message.self,
+    ofMaxSize: 4096,
+    from: receivePort,
+    options: [],
+    timeout: MACH_MSG_TIMEOUT_NONE
+)
+
+print("Received message from: \(received.header.remotePort.name)")
+print("Message size: \(received.header.msgh_size)")
+```
+
+### Message Options
+
+```swift
+import MachCore
+
+// Common message options
+var options: Mach.MessageOptions = []
+
+// Use timeouts
+options.insert(.sendTimeout)
+options.insert(.receiveTimeout)
+
+// Send/receive with timeout
+try Mach.Message.send(
+    message,
+    to: port,
+    options: options,
+    timeout: 1000  // 1 second in milliseconds
+)
+```
+
+### Combined Send-Receive (RPC Pattern)
+
+```swift
+import MachCore
+
+// Send a request and receive a reply in one operation
+let request = Mach.Message()
+request.header.remotePort = serverPort
+request.header.localPort = replyPort  // Where to send reply
+
+let reply = try Mach.Message.send(
+    request,
+    to: serverPort,
+    receiving: Mach.Message.self,
+    from: replyPort,
+    timeout: 5000  // 5 second timeout
+)
+
+print("Got reply with size: \(reply.header.msgh_size)")
+```
+
+<Accordion title="Understanding RPC with Mach Messages">
+The send-receive pattern is fundamental to Mach RPC:
+
+1. Client creates a request message
+2. Client includes a reply port (often send-once right)
+3. Client sends request and waits for reply
+4. Server receives request, processes it
+5. Server sends reply to the reply port
+6. Client receives reply
+
+Kass's combined send-receive operation atomically handles steps 3 and 6.
+</Accordion>
+
+### Message Queues
+
+```swift
+import MachCore
+
+// Create message queue from port with receive right
+let queue = Mach.MessageQueue(named: portName)
+
+// Enqueue (send) a message
+try queue.enqueue(message, timeout: 1000)
+
+// Dequeue (receive) a message
+let received = try queue.dequeue(
+    Mach.Message.self,
+    timeout: 5000
+)
+
+// Peek at next message without removing it
+if let server = queue as? Mach.MessageServer {
+    var seqNum: mach_port_seqno_t = 0
+    let peeked = try server.peek(sequenceNumber: &seqNum)
+    print("Next message ID: \(peeked.id), size: \(peeked.size)")
+}
+```
+
+## Memory Safety
+
+### Safe Pointer Handling
+
+Kass uses Swift's unsafe pointer APIs with automatic cleanup:
+
+```swift
+import MachCore
+
+// Example from Kass internals: automatic deallocation
+public func withUnsafeSerializedMessage<T>(
+    _ body: (UnsafeMutablePointer<mach_msg_header_t>) throws -> T
+) rethrows -> T {
+    let headerPointer = self.serialize()
+    defer { headerPointer.deallocate() }  // Cleanup always happens
+    return try body(headerPointer)
+}
+
+// Usage: memory is automatically freed
+try message.withUnsafeSerializedMessage { headerPtr in
+    try Mach.Message.message(
+        headerPtr,
+        options: options,
+        sendSize: message.sendSize,
+        receiveSize: 0,
+        receivePort: .Nil,
+        timeout: MACH_MSG_TIMEOUT_NONE,
+        notifyPort: .Nil
+    )
+}
+// headerPtr is deallocated here automatically
+```
+
+### Count-In-Out Pattern
+
+Many kernel calls expect array pointers with counts:
+
+```swift
+import MachCore
+
+// Kass provides safe wrappers for count-in-out calls
+let threadList = try Mach.callWithCountInOut(
+    count: &threadCount
+) { array, count in
+    task_threads(task, &array, &count)
+}
+
+// Array is automatically allocated and deallocated
+// Result is returned as safe Swift array
+for thread in threadList {
+    print("Thread: 0x\(String(thread, radix: 16))")
+}
+```
+
+<Info>
+Kass's `callWithCountInOut` family of functions handle buffer allocation, kernel call, array copying, and cleanup automatically.
+</Info>
+
+### Bitwise Copyable Types
+
+```swift
+import MachCore
+
+// Kass uses BitwiseCopyable for safe C struct handling
+let info = try Mach.callWithCountOut(
+    type: task_basic_info_64.self
+) { array, count in
+    task_info(task, TASK_BASIC_INFO_64, array, &count)
+}
+
+print("Virtual size: \(info.virtual_size)")
+print("Resident size: \(info.resident_size)")
+```
+
+## Thread Safety
+
+### Port Names and Concurrency
+
+<Warning>
+Port names are not thread-safe by default. Multiple threads accessing the same task's port namespace must synchronize.
+</Warning>
+
+```swift
+import MachCore
+import Foundation
+
+// Use a lock when accessing ports from multiple threads
+let portLock = NSLock()
+var sharedPort: Mach.Port?
+
+func accessPort() {
+    portLock.lock()
+    defer { portLock.unlock() }
+    
+    // Safe to access shared port here
+    if let port = sharedPort {
+        do {
+            let rights = try port.rights
+            print("Port rights: \(rights)")
+        } catch {
+            print("Error: \(error)")
+        }
+    }
+}
+```
+
+### Message Passing Concurrency
+
+```swift
+import MachCore
+
+// Multiple threads can safely send to the same port
+// The kernel serializes access to the message queue
+
+DispatchQueue.concurrentPerform(iterations: 10) { index in
+    let message = Mach.Message()
+    do {
+        try Mach.Message.send(message, to: sharedPort)
+    } catch {
+        print("Send failed: \(error)")
+    }
+}
+
+// Only one thread should receive from a port
+// Multiple receivers can cause messages to be lost
+```
+
+## Security Considerations
+
+### Privilege Requirements
+
+<AccordionGroup>
+  <Accordion title="Task-for-PID">
+    Getting a task port for another process requires:
+    - The `com.apple.security.cs.debugger` entitlement, OR
+    - Running as root
+    
+    ```swift
+    // This will fail without proper privileges
+    do {
+        let taskPort = try BSD.taskForPID(targetPID)
+    } catch POSIXError.EPERM {
+        print("Need debugger entitlement or root")
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Sysctl Writes">
+    Most sysctl write operations require root:
+    
+    ```swift
+    // Requires root
+    do {
+        try BSD.sysctl("kern.hostname", setTo: "new-name")
+    } catch POSIXError.EPERM {
+        print("Need root privileges")
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Port Operations">
+    Some port operations require ownership:
+    
+    ```swift
+    // Need receive right to deallocate
+    // Need appropriate rights for guarding
+    // Can't access ports in other task namespaces without task port
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### System Integrity Protection
+
+```swift
+import BSDCore
+
+// Check SIP status before attempting restricted operations
+// BSD.CSR provides csr_check() wrapper
+
+// Some operations are blocked even for root when SIP is enabled:
+// - Modifying system files
+// - Injecting into platform binaries
+// - Certain kernel debugging operations
+```
+
+<Warning>
+System Integrity Protection (SIP) restricts many operations even with root privileges. Respect SIP restrictions in production code.
+</Warning>
+
+### Port Rights and Security
+
+```swift
+import MachCore
+
+// Port guards prevent accidental or malicious port manipulation
+let guardContext: mach_port_context_t = 0xDEADBEEF
+
+try port.guard(
+    with: guardContext,
+    flags: [.strict, .immovableReceive]
+)
+
+// Now operations require the guard context
+// Protects against:
+// - Accidental deallocation
+// - Malicious port replacement attacks
+// - Confused deputy problems
+```
+
+## Best Practices
+
+### Resource Cleanup
+
+<Tabs>
+  <Tab title="Port Cleanup">
+    ```swift
+    import MachCore
+
+    // Use defer for guaranteed cleanup
+    func usePort() throws {
+        let port = Mach.Port(named: allocatedPortName)
+        defer {
+            // Clean up port rights
+            do {
+                try port.deallocate()
+            } catch {
+                print("Warning: failed to deallocate port: \(error)")
+            }
+        }
+        
+        // Use port
+        try performOperations(with: port)
+    }
+    ```
+  </Tab>
+  <Tab title="Task Suspension">
+    ```swift
+    import MachCore
+
+    func examineTask(_ task: Mach.Task) throws {
+        // Use suspension tokens for balanced suspend/resume
+        let token = try task.suspend2()
+        defer {
+            do {
+                try task.resume2(token: token)
+            } catch {
+                print("Warning: failed to resume: \(error)")
+            }
+        }
+        
+        // Task is suspended, examine safely
+        let threads = try task.threads
+        // ...
+    }
+    ```
+  </Tab>
+  <Tab title="File Descriptors">
+    ```swift
+    import BSDCore
+
+    func readFileData(path: String) throws -> Data {
+        let fd = try BSD.call(open(path, O_RDONLY))
+        defer { close(fd) }  // Always close FD
+        
+        var stat = stat()
+        try BSD.call(fstat(fd, &stat))
+        
+        var data = Data(count: Int(stat.st_size))
+        try data.withUnsafeMutableBytes { ptr in
+            try BSD.call(
+                read(fd, ptr.baseAddress, Int(stat.st_size))
+            )
+        }
+        return data
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Error Recovery
+
+```swift
+import MachCore
+
+func robustTaskOperation(pid: pid_t) {
+    do {
+        let task = try Mach.Task(named: try BSD.taskForPID(pid))
+        let threads = try task.threads
+        
+        for thread in threads {
+            do {
+                try processThread(thread)
+            } catch {
+                // Handle per-thread errors without aborting entire operation
+                print("Thread error: \(error), continuing...")
+            }
+        }
+    } catch POSIXError.ESRCH {
+        print("Process no longer exists")
+    } catch POSIXError.EPERM {
+        print("Insufficient privileges")
+    } catch MachError.invalidTask {
+        print("Task port is invalid or died")
+    } catch {
+        print("Unexpected error: \(error)")
+    }
+}
+```
+
+### Validation
+
+```swift
+import MachCore
+
+// Validate ports before use
+func safelyUsePort(_ port: Mach.Port) throws {
+    // Check if port has expected rights
+    let rights = try port.rights
+    
+    guard rights.contains(.send) else {
+        throw NSError(
+            domain: "com.example.app",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Port missing send right"]
+        )
+    }
+    
+    // Proceed with validated port
+    let message = Mach.Message()
+    try Mach.Message.send(message, to: port)
+}
+```
+
+## Performance Considerations
+
+### Minimize Kernel Calls
+
+```swift
+// Bad: Multiple syscalls in loop
+for pid in pids {
+    let task = try Mach.Task(named: try BSD.taskForPID(pid))
+    let threads = try task.threads  // Kernel call
+    // ...
+}
+
+// Better: Batch operations where possible
+let taskPorts = try pids.map { try BSD.taskForPID($0) }
+let tasks = taskPorts.map { Mach.Task(named: $0) }
+
+// Process in parallel if independent
+DispatchQueue.concurrentPerform(iterations: tasks.count) { index in
+    // ...
+}
+```
+
+### Cache Expensive Lookups
+
+```swift
+import BSDCore
+
+// Cache sysctl values that don't change often
+let cachedPageSize = try BSD.sysctl("hw.pagesize", as: Int.self)
+
+// Don't repeatedly query in tight loops
+for _ in 0..<1000 {
+    // Use cachedPageSize instead of querying each time
+}
+```
+
+## Debugging
+
+### Logging Kernel Calls
+
+```swift
+import MachCore
+
+func debugMachCall<T>(
+    _ name: String,
+    _ operation: () throws -> T
+) rethrows -> T {
+    print("[Mach] Calling: \(name)")
+    let start = Date()
+    defer {
+        let duration = Date().timeIntervalSince(start)
+        print("[Mach] \(name) took \(duration * 1000)ms")
+    }
+    return try operation()
+}
+
+// Usage
+let threads = try debugMachCall("task_threads") {
+    try task.threads
+}
+```
+
+### Inspecting Errors
+
+```swift
+import MachCore
+
+do {
+    try Mach.call(someKernelCall())
+} catch let error as MachError {
+    print("Mach error code: \(error.code)")
+    print("Raw value: \(error.code.rawValue)")
+    print("Description: \(error.localizedDescription)")
+    
+    // Log for debugging
+    NSLog("Kernel call failed with error: %@", error as NSError)
+}
+```
+
+## Summary
+
+<AccordionGroup>
+  <Accordion title="Error Handling">
+    - Use Mach.call() for Mach operations
+    - Use BSD.call() for POSIX operations  
+    - Catch specific error codes for recovery
+    - Always handle privilege errors gracefully
+  </Accordion>
+  
+  <Accordion title="Memory Safety">
+    - Use defer for guaranteed cleanup
+    - Leverage Kass's safe wrapper functions
+    - Never manually manage kernel-allocated buffers
+    - Use BitwiseCopyable types for C structs
+  </Accordion>
+  
+  <Accordion title="Security">
+    - Validate port rights before use
+    - Use port guards for critical ports
+    - Respect SIP and privilege boundaries
+    - Handle entitlement requirements properly
+  </Accordion>
+  
+  <Accordion title="Performance">
+    - Minimize kernel calls in hot paths
+    - Cache expensive lookups
+    - Batch independent operations
+    - Use concurrency for parallel work
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Review the overall system architecture
+  </Card>
+  <Card title="Mach Fundamentals" icon="cube" href="/concepts/mach-fundamentals">
+    Deep dive into Mach primitives
+  </Card>
+  <Card title="BSD Layer" icon="terminal" href="/concepts/bsd-layer">
+    Explore BSD subsystem operations
+  </Card>
+  <Card title="API Reference" icon="book" href="/api/machcore/ports">
+    Browse complete API documentation
+  </Card>
+</CardGroup>

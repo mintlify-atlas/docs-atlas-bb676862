@@ -1,0 +1,611 @@
+---
+title: 'Linking Module'
+description: 'Dynamic library and symbol loading utilities for macOS frameworks'
+---
+
+## Overview
+
+The Linking module provides a clean Swift API for dynamic library loading using `dlopen` and `dlsym`. It simplifies accessing frameworks, loading symbols, and working with Objective-C classes at runtime.
+
+<Note>
+**Source Location**: `Sources/Linking/`
+
+**Dependencies**: None (standalone module)
+
+**Future**: May be integrated into BSDCore in future versions
+</Note>
+
+## Core Components
+
+### Handle Types
+
+The module provides three main handle types:
+
+```swift linking.swift:3-26
+// Base handle class
+public class Handle: @unchecked Sendable {
+    public enum HandleType {
+        case library
+        case symbol
+    }
+    
+    public let name: String
+    public let rawHandle: UnsafeMutableRawPointer
+    public let type: HandleType
+}
+
+// Library handle (extends Handle)
+public class Library: Handle
+
+// Symbol handle (extends Handle)
+public class Symbol: Handle
+
+// Framework handle (extends Library)
+public class Framework: Library
+```
+
+## Loading Libraries
+
+### Library Class
+
+Load dynamic libraries by path:
+
+<Tabs>
+  <Tab title="Basic Usage">
+```swift linking.swift:29-46
+import Linking
+
+// Load a library
+if let lib = Library(path: "/usr/lib/libSystem.B.dylib") {
+    lib.link()  // Ensure it's linked
+    
+    // Get a symbol
+    if let symbol = lib.get(symbol: "malloc") {
+        let mallocFunc: @convention(c) (Int) -> UnsafeMutableRawPointer? 
+            = symbol.cast()
+        let ptr = mallocFunc(1024)
+        // Use allocated memory...
+    }
+}
+
+// Library is automatically closed when deallocated
+```
+  </Tab>
+  
+  <Tab title="Getting Symbols">
+```swift linking.swift:48-53
+// Get symbol by name
+let symbol = lib.get(symbol: "some_function")
+
+// Get symbol at specific address (useful for private symbols)
+let privateSymbol = lib.get(
+    symbol: "_private_function",
+    atExpectedAddress: 0x1000,
+    otherSymbol: "public_function",
+    otherSymbolExpectedAddress: 0x2000
+)
+```
+  </Tab>
+  
+  <Tab title="Objective-C Classes">
+```swift linking.swift:86-101
+// Get Objective-C class
+if let nsStringClass = lib.get(objCClass: "NSString") {
+    // Use the class...
+}
+
+// Get class with specific protocol
+protocol MyProtocol {}
+if let myClass = lib.get(
+    objCClass: "MyClass",
+    castTo: MyProtocol.Type.self
+) {
+    // Use typed class reference
+}
+```
+  </Tab>
+</Tabs>
+
+### Symbol Class
+
+Work with loaded symbols:
+
+```swift linking.swift:108-130
+import Linking
+
+// Cast symbol to function pointer
+let symbol = lib.get(symbol: "malloc")!
+let malloc: @convention(c) (Int) -> UnsafeMutableRawPointer? 
+    = symbol.cast()
+
+// Load symbol value
+let valueSymbol = lib.get(symbol: "some_global")!
+let value: Int = valueSymbol.load()
+
+// Raw pointer access
+let rawPtr = symbol.rawHandle
+```
+
+## Framework Loading
+
+### Framework Class
+
+Load system frameworks easily:
+
+<CodeGroup>
+```swift Public Frameworks
+import Linking
+
+// Load public framework
+if let foundation = Framework("Foundation") {
+    // Get symbols from Foundation
+    if let symbol = foundation.get(symbol: "NSLog") {
+        let nslog: @convention(c) (CFString) -> Void = symbol.cast()
+        // Use NSLog...
+    }
+}
+
+// Framework path: /System/Library/Frameworks/Foundation.framework/Foundation
+```
+
+```swift Private Frameworks
+// Load private framework
+if let coreSymbolication = Framework("CoreSymbolication", isPrivate: true) {
+    // Access private framework symbols
+    let symbol = coreSymbolication.get(symbol: "CSSymbolicatorCreateWithPid")
+    // Use private APIs...
+}
+
+// Framework path: /System/Library/PrivateFrameworks/CoreSymbolication.framework/CoreSymbolication
+```
+
+```swift Custom Paths
+// Load framework from custom location
+let customPath = URL(string: "/Library/Frameworks")!
+if let customFramework = Framework("MyFramework", inPath: customPath) {
+    // Use custom framework
+}
+```
+
+```swift Sub-Frameworks
+// Load sub-framework
+if let webkit = Framework("WebKit") {
+    // Get sub-framework
+    if let webCore = webkit.get(subFramework: "WebCore") {
+        // Use WebCore symbols
+    }
+}
+```
+</CodeGroup>
+
+## Common Patterns
+
+### Loading System Libraries
+
+<Tabs>
+  <Tab title="libSystem">
+```swift
+import Linking
+
+// Access libSystem symbols
+if let libSystem = Library(path: "/usr/lib/libSystem.B.dylib") {
+    // Memory allocation
+    let malloc: @convention(c) (Int) -> UnsafeMutableRawPointer? 
+        = libSystem.get(symbol: "malloc")!.cast()
+    let free: @convention(c) (UnsafeMutableRawPointer) -> Void 
+        = libSystem.get(symbol: "free")!.cast()
+    
+    let ptr = malloc(1024)!
+    // Use memory...
+    free(ptr)
+    
+    // String functions
+    let strlen: @convention(c) (UnsafePointer<CChar>) -> Int 
+        = libSystem.get(symbol: "strlen")!.cast()
+    
+    "Hello".withCString { cstr in
+        let len = strlen(cstr)
+        print("Length: \(len)")
+    }
+}
+```
+  </Tab>
+  
+  <Tab title="libc++">
+```swift
+// Access C++ standard library
+if let libcxx = Library(path: "/usr/lib/libc++.1.dylib") {
+    // Get C++ symbols (mangled names)
+    let symbol = libcxx.get(symbol: "_ZNSt3__16vectorIiNS_9allocatorIiEEE6resizeEm")
+    // Use with caution - C++ ABI is complex
+}
+```
+  </Tab>
+  
+  <Tab title="Dynamic Loading">
+```swift
+func loadLibrary(named name: String) -> Library? {
+    // Try common library paths
+    let paths = [
+        "/usr/lib/lib\(name).dylib",
+        "/usr/local/lib/lib\(name).dylib",
+        "/opt/homebrew/lib/lib\(name).dylib"
+    ]
+    
+    for path in paths {
+        if let lib = Library(path: path) {
+            return lib
+        }
+    }
+    
+    return nil
+}
+
+if let ssl = loadLibrary(named: "ssl") {
+    print("Loaded SSL library")
+}
+```
+  </Tab>
+</Tabs>
+
+### Working with Objective-C
+
+<CodeGroup>
+```swift Class Loading
+import Linking
+import Foundation
+
+// Load Foundation framework
+if let foundation = Framework("Foundation") {
+    // Get NSString class
+    if let nsStringClass = foundation.get(objCClass: "NSString") {
+        // Create instance using class reference
+        // Note: This requires careful bridging to Objective-C runtime
+    }
+    
+    // Get other classes
+    let _ = foundation.get(objCClass: "NSArray")
+    let _ = foundation.get(objCClass: "NSDictionary")
+    let _ = foundation.get(objCClass: "NSData")
+}
+```
+
+```swift Method Resolution
+// Get Objective-C method implementations
+if let foundation = Framework("Foundation") {
+    // Access class methods
+    let classSymbol = foundation.get(symbol: "OBJC_CLASS_$_NSString")
+    
+    // Access method implementations
+    // Note: Objective-C runtime functions needed for full support
+    let method = foundation.get(symbol: "objc_msgSend")
+}
+```
+
+```swift Private Classes
+// Load private frameworks with private classes
+if let privateFramework = Framework("SomePrivateFramework", isPrivate: true) {
+    if let privateClass = privateFramework.get(objCClass: "_PrivateClass") {
+        // Use private class (reverse engineering use case)
+    }
+}
+```
+</CodeGroup>
+
+## Advanced Usage
+
+### Symbol Address Resolution
+
+```swift linking.swift:61-85
+import Linking
+
+// Get symbol at specific address (for private/unexported symbols)
+if let lib = Library(path: "/usr/lib/libsystem_kernel.dylib") {
+    // Find private symbol using public symbol as reference
+    let privateFunc = lib.get(
+        symbol: "__workq_kernreturn",
+        atExpectedAddress: 0x1A840,  // From binary analysis
+        otherSymbol: "__workq_open",   // Public reference symbol
+        otherSymbolExpectedAddress: 0x1A800
+    )
+    
+    if let symbol = privateFunc {
+        // Use private function
+        let workqKernreturn: @convention(c) (Int32, UnsafeMutableRawPointer?, Int) -> Int32
+            = symbol.cast()
+        // Call private API...
+    }
+}
+```
+
+### Lazy Loading Pattern
+
+```swift
+import Linking
+
+class LazyLibrary {
+    private var _framework: Framework?
+    
+    var framework: Framework? {
+        if _framework == nil {
+            _framework = Framework("SomeFramework")
+        }
+        return _framework
+    }
+    
+    lazy var someFunction: (@convention(c) (Int) -> Int)? = {
+        framework?.get(symbol: "some_function")?.cast()
+    }()
+    
+    func callFunction(_ value: Int) -> Int? {
+        return someFunction?(value)
+    }
+}
+
+let lib = LazyLibrary()
+if let result = lib.callFunction(42) {
+    print("Result: \(result)")
+}
+```
+
+### Global Symbol Cache
+
+```swift
+import Linking
+
+class SymbolCache {
+    static let shared = SymbolCache()
+    
+    private var libraries: [String: Library] = [:]
+    private var symbols: [String: Symbol] = [:]
+    
+    func library(named name: String, isPrivate: Bool = false) -> Library? {
+        let key = "\(name)_\(isPrivate)"
+        if let cached = libraries[key] {
+            return cached
+        }
+        
+        guard let lib = Framework(name, isPrivate: isPrivate) else {
+            return nil
+        }
+        
+        libraries[key] = lib
+        return lib
+    }
+    
+    func symbol(named name: String, in libraryName: String) -> Symbol? {
+        let key = "\(libraryName):\(name)"
+        if let cached = symbols[key] {
+            return cached
+        }
+        
+        guard let lib = library(named: libraryName),
+              let symbol = lib.get(symbol: name) else {
+            return nil
+        }
+        
+        symbols[key] = symbol
+        return symbol
+    }
+}
+
+// Usage
+if let symbol = SymbolCache.shared.symbol(named: "malloc", in: "System") {
+    let malloc: @convention(c) (Int) -> UnsafeMutableRawPointer? = symbol.cast()
+    let ptr = malloc(1024)
+    // Use pointer...
+}
+```
+
+## Integration Examples
+
+### With MachCore
+
+```swift
+import Linking
+import MachCore
+
+// Load symbols for task operations
+if let libSystem = Library(path: "/usr/lib/libSystem.B.dylib") {
+    // Get task_for_pid (requires proper entitlements)
+    let taskForPidSymbol = libSystem.get(symbol: "task_for_pid")
+    
+    // Get other Mach symbols
+    let machTaskSelf = libSystem.get(symbol: "mach_task_self")?.load() as task_t?
+    
+    // Use with MachCore
+    let currentTask = Mach.Task.current
+}
+```
+
+### With BSDCore
+
+```swift
+import Linking
+import BSDCore
+
+// Load BSD symbols
+if let libSystem = Library(path: "/usr/lib/libSystem.B.dylib") {
+    // Get syscall wrappers
+    let openSymbol = libSystem.get(symbol: "open")
+    let readSymbol = libSystem.get(symbol: "read")
+    let writeSymbol = libSystem.get(symbol: "write")
+    
+    // Use with BSDCore
+    let fd = try BSD.call(open("/tmp/test.txt", O_RDONLY))
+    defer { close(fd) }
+}
+```
+
+## Common Use Cases
+
+<AccordionGroup>
+  <Accordion title="Private API Access">
+```swift
+import Linking
+
+// Access private framework
+guard let privateFramework = Framework("SomePrivateFramework", isPrivate: true) else {
+    print("Failed to load private framework")
+    return
+}
+
+// Get private function
+guard let symbol = privateFramework.get(symbol: "_SomePrivateFunction") else {
+    print("Failed to find private symbol")
+    return
+}
+
+// Cast to function type
+typealias PrivateFunc = @convention(c) (Int, UnsafePointer<CChar>?) -> Int32
+let privateFunc: PrivateFunc = symbol.cast()
+
+// Call private API
+let result = "parameter".withCString { cstr in
+    privateFunc(42, cstr)
+}
+
+print("Private API result: \(result)")
+```
+  </Accordion>
+  
+  <Accordion title="Runtime Function Replacement">
+```swift
+import Linking
+
+// Load library containing function to replace
+guard let lib = Library(path: "/usr/lib/libsystem_c.dylib") else { return }
+
+// Get original function
+guard let originalSymbol = lib.get(symbol: "printf") else { return }
+let originalPrintf: @convention(c) (UnsafePointer<CChar>, CVarArg...) -> Int32 
+    = originalSymbol.cast()
+
+// Create replacement (requires dynamic patching - beyond this module's scope)
+// This example shows how to get the symbol for later patching
+let originalAddress = originalSymbol.rawHandle
+print("Original printf at: \(originalAddress)")
+
+// Note: Actual function replacement requires memory protection changes
+// and instruction patching, typically done with MachCore
+```
+  </Accordion>
+  
+  <Accordion title="Plugin System">
+```swift
+import Linking
+import Foundation
+
+protocol Plugin {
+    var name: String { get }
+    func execute()
+}
+
+class PluginLoader {
+    func loadPlugin(at path: String) -> Plugin? {
+        guard let lib = Library(path: path) else {
+            return nil
+        }
+        
+        // Get plugin initialization function
+        guard let initSymbol = lib.get(symbol: "plugin_init") else {
+            return nil
+        }
+        
+        typealias InitFunc = @convention(c) () -> UnsafeMutableRawPointer?
+        let initFunc: InitFunc = initSymbol.cast()
+        
+        guard let pluginPtr = initFunc() else {
+            return nil
+        }
+        
+        // Convert to Swift plugin object
+        // Note: Requires proper plugin ABI design
+        return Unmanaged<AnyObject>.fromOpaque(pluginPtr)
+            .takeRetainedValue() as? Plugin
+    }
+    
+    func loadPlugins(in directory: String) -> [Plugin] {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(atPath: directory) else {
+            return []
+        }
+        
+        return files
+            .filter { $0.hasSuffix(".dylib") }
+            .compactMap { loadPlugin(at: "\(directory)/\($0)") }
+    }
+}
+
+let loader = PluginLoader()
+let plugins = loader.loadPlugins(in: "/path/to/plugins")
+plugins.forEach { $0.execute() }
+```
+  </Accordion>
+</AccordionGroup>
+
+## Thread Safety
+
+<Warning>
+- Library loading is thread-safe (handled by dyld)
+- Symbol lookups are thread-safe
+- Handle objects are marked `@unchecked Sendable`
+- Concurrent access to the same library is safe
+- Function pointers obtained from symbols should be used carefully across threads
+</Warning>
+
+## Best Practices
+
+1. **Cache library handles**: Loading libraries is expensive
+2. **Check for nil**: Symbol lookups can fail
+3. **Use proper function types**: Incorrect casts lead to crashes
+4. **Release handles**: Libraries are automatically closed on dealloc
+5. **Validate symbol addresses**: When using address-based loading
+6. **Handle versioning**: Framework APIs can change between OS versions
+
+## Performance Considerations
+
+```swift
+// Good: Load once, use many times
+let lib = Framework("Foundation")!
+let symbol1 = lib.get(symbol: "func1")
+let symbol2 = lib.get(symbol: "func2")
+
+// Bad: Repeated loading
+for _ in 0..<1000 {
+    let lib = Framework("Foundation")  // Expensive!
+    let symbol = lib?.get(symbol: "func1")
+}
+
+// Good: Cache symbols
+class SymbolCache {
+    let malloc: (@convention(c) (Int) -> UnsafeMutableRawPointer?)?
+    let free: (@convention(c) (UnsafeMutableRawPointer) -> Void)?
+    
+    init() {
+        let lib = Library(path: "/usr/lib/libSystem.B.dylib")
+        malloc = lib?.get(symbol: "malloc")?.cast()
+        free = lib?.get(symbol: "free")?.cast()
+    }
+}
+```
+
+## Limitations
+
+- No automatic dependency resolution
+- Limited support for C++ symbols (name mangling)
+- Objective-C runtime interaction requires additional work
+- No versioning support
+- No unload functionality (relies on automatic dealloc)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="BSDCore Module" icon="terminal" href="/modules/bsdcore">
+    Use with BSD system calls
+  </Card>
+  
+  <Card title="MachCore Module" icon="gear" href="/modules/machcore">
+    Integrate with Mach operations
+  </Card>
+</CardGroup>

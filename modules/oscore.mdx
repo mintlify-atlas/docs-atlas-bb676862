@@ -1,0 +1,718 @@
+---
+title: 'OSCore Module'
+description: 'OS-specific utilities including Darwin notifications and IOKit access'
+---
+
+## Overview
+
+OSCore provides Swift wrappers for OS-specific features on macOS and Darwin. It includes support for the Darwin notification system (Libnotify), IOKit interfaces, and other system-level utilities.
+
+<Note>
+**Source Location**: `Sources/OS/Core/`
+
+**Dependencies**: KassHelpers, KassC, BSDCore, MachCore
+</Note>
+
+## Core Components
+
+### OS Namespace
+
+The main entry point for OS-specific operations:
+
+```swift OS.swift:1-5
+import KassHelpers
+
+public class OS: KassHelpers.Namespace {}
+```
+
+All OS-specific functionality is organized under this namespace.
+
+## Darwin Notifications (Libnotify)
+
+### OS.Notify
+
+Swift wrapper for the Darwin notification system:
+
+<Tabs>
+  <Tab title="Basic Usage">
+```swift Notify.swift:7-73
+import OSCore
+
+// Create notification name
+let notification = OS.Notify.NotificationName("com.example.myevent")
+
+// Post notification
+try notification.post()
+
+// Register for notifications
+let token = try notification.register(
+    handler: { _ in
+        print("Notification received!")
+    },
+    onQueue: DispatchQueue.main
+)
+
+// Cancel when done
+try token.cancel()
+```
+  </Tab>
+  
+  <Tab title="Check Without Handler">
+```swift Notify.swift:33-37
+// Register without handler
+let token = try notification.register()
+
+// Check for notifications
+if try token.check() {
+    print("Notification was posted")
+}
+
+// Cancel registration
+try token.cancel()
+```
+  </Tab>
+  
+  <Tab title="Signal Delivery">
+```swift Notify.swift:39-46
+// Get notification via signal
+let token = try notification.register(signal: SIGUSR1)
+
+// Set up signal handler
+signal(SIGUSR1) { _ in
+    // Check which notification caused signal
+    // Must call check() on potential tokens
+}
+
+// When done
+try token.cancel()
+```
+  </Tab>
+  
+  <Tab title="Mach Port Delivery">
+```swift Notify.swift:48-60
+// Receive notifications on Mach port
+var port: Mach.Port? = nil
+let token = try notification.register(
+    machPort: &port,
+    flags: [.reuse]
+)
+
+// Port is now allocated if it was nil
+print("Notification port: \(port!.name)")
+
+// Receive messages on port
+// Message ID will be token value
+
+try token.cancel()
+```
+  </Tab>
+</Tabs>
+
+### NotificationToken
+
+Manage notification registrations:
+
+<CodeGroup>
+```swift State Management
+import OSCore
+
+let notification = OS.Notify.NotificationName("com.example.counter")
+let token = try notification.register()
+
+// Set state value (64-bit integer)
+try token.setState(42)
+
+// Get state value
+let value = try token.getState()
+print("Counter value: \(value)")
+
+// State is shared across all observers
+```
+
+```swift Token Operations
+// Check if token is valid
+if token.isValid {
+    print("Token is active")
+}
+
+// Resume suspended token
+try token.resume()
+
+// Cancel token
+try token.cancel()
+
+// After cancel, token is no longer valid
+if !token.isValid {
+    print("Token was cancelled")
+}
+```
+</CodeGroup>
+
+### Notify Flags
+
+```swift NotifyFlags.swift
+import OSCore
+
+public struct NotifyFlags: OptionSet {
+    public let rawValue: Int32
+    
+    // Reuse existing port instead of allocating new one
+    public static let reuse = NotifyFlags(rawValue: NOTIFY_REUSE)
+}
+```
+
+## Common Notification Patterns
+
+### Broadcast/Subscribe Pattern
+
+<Tabs>
+  <Tab title="Broadcaster">
+```swift
+import OSCore
+
+class EventBroadcaster {
+    private let notification: OS.Notify.NotificationName
+    
+    init(name: String) {
+        self.notification = OS.Notify.NotificationName(name)
+    }
+    
+    func broadcast(value: UInt64) throws {
+        // Set state before posting
+        let token = try notification.register()
+        try token.setState(value)
+        try token.cancel()
+        
+        // Broadcast to all observers
+        try notification.post()
+    }
+}
+
+let broadcaster = EventBroadcaster(name: "com.example.data")
+try broadcaster.broadcast(value: 123)
+```
+  </Tab>
+  
+  <Tab title="Subscriber">
+```swift
+import OSCore
+import Foundation
+
+class EventSubscriber {
+    private var token: OS.Notify.NotificationToken?
+    
+    func subscribe(to name: String, handler: @escaping (UInt64) -> Void) throws {
+        let notification = OS.Notify.NotificationName(name)
+        
+        token = try notification.register(
+            handler: { [notification] _ in
+                // Get state when notification arrives
+                if let token = try? notification.register() {
+                    if let value = try? token.getState() {
+                        handler(value)
+                    }
+                    try? token.cancel()
+                }
+            },
+            onQueue: DispatchQueue.global()
+        )
+    }
+    
+    func unsubscribe() throws {
+        try token?.cancel()
+        token = nil
+    }
+}
+
+let subscriber = EventSubscriber()
+try subscriber.subscribe(to: "com.example.data") { value in
+    print("Received value: \(value)")
+}
+
+// Later
+try subscriber.unsubscribe()
+```
+  </Tab>
+</Tabs>
+
+### Process Coordination
+
+```swift
+import OSCore
+import Foundation
+
+// Parent process
+class ParentProcess {
+    func waitForChild() throws {
+        let notification = OS.Notify.NotificationName("com.example.child.ready")
+        let token = try notification.register()
+        
+        print("Waiting for child process...")
+        
+        // Poll for notification
+        while true {
+            if try token.check() {
+                print("Child process is ready!")
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        
+        try token.cancel()
+    }
+}
+
+// Child process
+class ChildProcess {
+    func signalReady() throws {
+        // Do initialization work...
+        Thread.sleep(forTimeInterval: 2.0)
+        
+        // Signal parent
+        let notification = OS.Notify.NotificationName("com.example.child.ready")
+        try notification.post()
+        print("Child process signaled ready")
+    }
+}
+```
+
+### Cross-Process State Sharing
+
+```swift
+import OSCore
+
+class SharedCounter {
+    private let notification: OS.Notify.NotificationName
+    private var token: OS.Notify.NotificationToken?
+    
+    init(name: String) throws {
+        self.notification = OS.Notify.NotificationName(name)
+        self.token = try notification.register()
+    }
+    
+    func increment() throws {
+        let current = try token!.getState()
+        try token!.setState(current + 1)
+        try notification.post()
+    }
+    
+    func getValue() throws -> UInt64 {
+        return try token!.getState()
+    }
+    
+    deinit {
+        try? token?.cancel()
+    }
+}
+
+// Process A
+let counterA = try SharedCounter(name: "com.example.counter")
+try counterA.increment()  // 0 -> 1
+
+// Process B (different process)
+let counterB = try SharedCounter(name: "com.example.counter")
+let value = try counterB.getValue()  // Reads 1
+try counterB.increment()  // 1 -> 2
+```
+
+## System Notifications
+
+macOS posts many system notifications that you can observe:
+
+<CodeGroup>
+```swift Power Management
+import OSCore
+
+// System will sleep
+let sleepNotification = OS.Notify.NotificationName(
+    "com.apple.system.powermanagement.sleep"
+)
+let sleepToken = try sleepNotification.register(
+    handler: { _ in
+        print("System is going to sleep")
+    },
+    onQueue: .main
+)
+
+// System did wake
+let wakeNotification = OS.Notify.NotificationName(
+    "com.apple.system.powermanagement.wake"
+)
+let wakeToken = try wakeNotification.register(
+    handler: { _ in
+        print("System woke up")
+    },
+    onQueue: .main
+)
+```
+
+```swift Network Changes
+// Network configuration changed
+let networkNotification = OS.Notify.NotificationName(
+    "com.apple.system.config.network_change"
+)
+let networkToken = try networkNotification.register(
+    handler: { _ in
+        print("Network configuration changed")
+    },
+    onQueue: .global()
+)
+```
+
+```swift User Session
+// User logged in
+let loginNotification = OS.Notify.NotificationName(
+    "com.apple.system.loginwindow.loggedin"
+)
+
+// User logged out  
+let logoutNotification = OS.Notify.NotificationName(
+    "com.apple.system.loginwindow.loggedout"
+)
+
+// Screen locked
+let lockNotification = OS.Notify.NotificationName(
+    "com.apple.screenIsLocked"
+)
+
+// Screen unlocked
+let unlockNotification = OS.Notify.NotificationName(
+    "com.apple.screenIsUnlocked"
+)
+```
+</CodeGroup>
+
+## Integration with Other Modules
+
+### With MachCore
+
+```swift
+import OSCore
+import MachCore
+
+// Use Mach port for notifications
+var port: Mach.Port? = nil
+let notification = OS.Notify.NotificationName("com.example.event")
+let token = try notification.register(
+    machPort: &port,
+    flags: [.reuse]
+)
+
+// Receive messages using MachCore
+let receivePort = port!
+
+// Set up message receive
+let buffer = UnsafeMutablePointer<mach_msg_header_t>.allocate(capacity: 1024)
+defer { buffer.deallocate() }
+
+try Mach.call(
+    mach_msg(
+        buffer,
+        MACH_RCV_MSG,
+        0,
+        1024,
+        receivePort.name,
+        MACH_MSG_TIMEOUT_NONE,
+        MACH_PORT_NULL
+    )
+)
+
+// Message ID contains token value
+print("Received notification, token: \(buffer.pointee.msgh_id)")
+```
+
+### With BSDCore
+
+```swift
+import OSCore
+import BSDCore
+
+// Use file descriptor for notifications
+var fd: Int32 = -1
+let notification = OS.Notify.NotificationName("com.example.event")
+let token = try notification.register(
+    fileDescriptor: &fd,
+    flags: [.reuse]
+)
+
+// Use with select/poll
+var readfds = fd_set()
+FD_ZERO(&readfds)
+FD_SET(fd, &readfds)
+
+var timeout = timeval(tv_sec: 5, tv_usec: 0)
+let result = try BSD.call(select(fd + 1, &readfds, nil, nil, &timeout))
+
+if result > 0 && FD_ISSET(fd, &readfds) {
+    // Read token value from file descriptor
+    var tokenValue: Int32 = 0
+    try BSD.call(read(fd, &tokenValue, MemoryLayout<Int32>.size))
+    print("Notification received, token: \(tokenValue)")
+}
+```
+
+## IOKit Support
+
+<Warning>
+IOKit support in OSCore is currently minimal. Full IOKit integration is planned for future releases.
+</Warning>
+
+### Current IOKit Features
+
+Basic IOKit definitions and helpers:
+
+```swift
+import OSCore
+
+// IOKit service access
+// (Minimal support - use IOKit directly for now)
+
+// Available types:
+// - IOCFPlugIn
+// - CFPlugInCOM
+
+// See Sources/OS/Core/Features/IOKit/ for details
+```
+
+## Once and AllocOnce
+
+Thread-safe initialization utilities:
+
+```swift
+import OSCore
+
+// Execute code exactly once
+var onceToken = OS.Once()
+onceToken.perform {
+    print("This runs exactly once")
+}
+
+// Safe from multiple threads
+DispatchQueue.concurrentPerform(iterations: 100) { _ in
+    onceToken.perform {
+        print("Still runs only once")
+    }
+}
+```
+
+## Error Handling
+
+OSCore uses Swift errors from underlying systems:
+
+```swift
+import OSCore
+
+do {
+    let token = try notification.register()
+} catch NotifyError.invalidName {
+    print("Invalid notification name")
+} catch NotifyError.notAuthorized {
+    print("Not authorized for notification")
+} catch {
+    print("Other error: \(error)")
+}
+```
+
+## Performance Considerations
+
+<Info>
+**Darwin Notifications**:
+- Lightweight IPC mechanism
+- System-wide broadcast
+- No guaranteed delivery
+- Best for coordination, not data transfer
+- Limited to 64-bit state values
+
+**Best Practices**:
+- Use for signaling, not large data
+- Don't rely on delivery guarantees
+- Cancel tokens when done
+- Use appropriate queue for handlers
+</Info>
+
+## Common Use Cases
+
+<AccordionGroup>
+  <Accordion title="App Coordination">
+```swift
+import OSCore
+import Foundation
+
+// App A: Requests service
+let requestNotification = OS.Notify.NotificationName(
+    "com.example.service.request"
+)
+let responseNotification = OS.Notify.NotificationName(
+    "com.example.service.response"
+)
+
+// Set up response handler first
+let responseToken = try responseNotification.register(
+    handler: { _ in
+        print("Service responded")
+    },
+    onQueue: .main
+)
+
+// Send request
+try requestNotification.post()
+
+// App B: Provides service
+let token = try requestNotification.register(
+    handler: { [responseNotification] _ in
+        // Handle request
+        print("Processing request...")
+        Thread.sleep(forTimeInterval: 1.0)
+        
+        // Send response
+        try? responseNotification.post()
+    },
+    onQueue: .global()
+)
+```
+  </Accordion>
+  
+  <Accordion title="Background Task Coordination">
+```swift
+import OSCore
+import Foundation
+
+class BackgroundTaskManager {
+    private let taskNotification: OS.Notify.NotificationName
+    private var completionToken: OS.Notify.NotificationToken?
+    
+    init() {
+        taskNotification = OS.Notify.NotificationName("com.example.background.task")
+    }
+    
+    func scheduleTask(completion: @escaping () -> Void) throws {
+        // Register for completion
+        let completionNotification = OS.Notify.NotificationName(
+            "com.example.background.complete"
+        )
+        
+        completionToken = try completionNotification.register(
+            handler: { _ in
+                completion()
+            },
+            onQueue: .main
+        )
+        
+        // Trigger background task
+        try taskNotification.post()
+    }
+    
+    func signalCompletion() throws {
+        let notification = OS.Notify.NotificationName(
+            "com.example.background.complete"
+        )
+        try notification.post()
+    }
+}
+
+let manager = BackgroundTaskManager()
+try manager.scheduleTask {
+    print("Background task completed")
+}
+```
+  </Accordion>
+  
+  <Accordion title="System Monitoring Dashboard">
+```swift
+import OSCore
+import Foundation
+
+class SystemMonitor {
+    private var tokens: [OS.Notify.NotificationToken] = []
+    
+    func startMonitoring() throws {
+        // Sleep/wake monitoring
+        let sleepToken = try OS.Notify.NotificationName(
+            "com.apple.system.powermanagement.sleep"
+        ).register(handler: { _ in
+            print("[\(Date())] System sleeping")
+        }, onQueue: .main)
+        
+        let wakeToken = try OS.Notify.NotificationName(
+            "com.apple.system.powermanagement.wake"
+        ).register(handler: { _ in
+            print("[\(Date())] System woke")
+        }, onQueue: .main)
+        
+        // Network changes
+        let networkToken = try OS.Notify.NotificationName(
+            "com.apple.system.config.network_change"
+        ).register(handler: { _ in
+            print("[\(Date())] Network changed")
+        }, onQueue: .main)
+        
+        // Screen lock/unlock
+        let lockToken = try OS.Notify.NotificationName(
+            "com.apple.screenIsLocked"
+        ).register(handler: { _ in
+            print("[\(Date())] Screen locked")
+        }, onQueue: .main)
+        
+        let unlockToken = try OS.Notify.NotificationName(
+            "com.apple.screenIsUnlocked"
+        ).register(handler: { _ in
+            print("[\(Date())] Screen unlocked")
+        }, onQueue: .main)
+        
+        tokens = [sleepToken, wakeToken, networkToken, lockToken, unlockToken]
+        print("System monitoring started")
+    }
+    
+    func stopMonitoring() throws {
+        for token in tokens {
+            try token.cancel()
+        }
+        tokens.removeAll()
+        print("System monitoring stopped")
+    }
+}
+
+let monitor = SystemMonitor()
+try monitor.startMonitoring()
+
+// Monitor runs...
+
+// Clean up
+try monitor.stopMonitoring()
+```
+  </Accordion>
+</AccordionGroup>
+
+## Limitations
+
+<Warning>
+- Darwin notifications are system-wide broadcasts
+- No delivery guarantees
+- State limited to 64-bit unsigned integer
+- No payload data in notifications
+- Not suitable for high-frequency events
+- IOKit support is minimal
+</Warning>
+
+## Future Development
+
+Planned features for OSCore:
+
+- Full IOKit service matching and access
+- IORegistry browsing utilities
+- Power management APIs
+- System configuration framework wrappers
+- Launch services integration
+- XPC service helpers
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MachCore Module" icon="gear" href="/modules/machcore">
+    Use Mach ports for advanced IPC
+  </Card>
+  
+  <Card title="BSDCore Module" icon="terminal" href="/modules/bsdcore">
+    Explore BSD system features
+  </Card>
+</CardGroup>

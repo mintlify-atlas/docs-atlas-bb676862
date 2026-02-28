@@ -1,0 +1,496 @@
+---
+title: Debugging Techniques
+description: Techniques for debugging kernel interactions and understanding errors when using Kass
+---
+
+## Understanding Mach Errors
+
+Kass wraps low-level Mach kernel calls that return `kern_return_t` error codes. Understanding these errors is crucial for debugging:
+
+### Common Error Codes
+
+```swift
+import MachCore
+
+do {
+    let task = try Mach.Task.forPID(9999)
+} catch let error as MachError {
+    switch error.code {
+    case .invalidArgument:
+        print("Invalid argument passed to kernel")
+    case .invalidName:
+        print("Invalid port name or task ID")
+    case .invalidRight:
+        print("Insufficient rights for this operation")
+    case .failure:
+        print("Generic failure - check privileges")
+    default:
+        print("Mach error: \(error.code.name ?? "unknown")")
+    }
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+<Note>
+  The `MachError.Code` type provides named error constants that correspond to kernel return codes like `KERN_SUCCESS`, `KERN_INVALID_ARGUMENT`, etc.
+</Note>
+
+### Error Handling Patterns
+
+Always handle errors explicitly when working with kernel operations:
+
+```swift
+// Bad: Silently ignoring errors
+let task = try? Mach.Task.forPID(pid)
+
+// Good: Explicit error handling
+do {
+    let task = try Mach.Task.forPID(pid)
+    // Work with task
+} catch MachError.failure {
+    print("Cannot access task - check privileges")
+} catch MachError.invalidArgument {
+    print("Invalid PID: \(pid)")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+## Debugging Port Operations
+
+Mach ports are fundamental to XNU and errors here are common:
+
+### Inspecting Port Rights
+
+```swift
+let port = somePort
+
+do {
+    let rights = try port.rights
+    print("Port rights: \(rights.rights.map { $0.name ?? "unknown" })")
+    
+    if rights.contains(.send) {
+        print("Has send right")
+    }
+    if rights.contains(.receive) {
+        print("Has receive right")
+    }
+} catch {
+    print("Failed to get port rights: \(error)")
+}
+```
+
+<Tip>
+  Use the `debugDescription` property on ports to see both the port name and owning task:
+  ```swift
+  print(port.debugDescription)
+  // Output: <Mach.Port(Port): name: 0x00001807, task: 0x00000103>
+  ```
+</Tip>
+
+### Checking Port Validity
+
+```swift
+// Check if a port is still valid
+func isPortValid(_ port: Mach.Port) -> Bool {
+    do {
+        _ = try port.rights
+        return true
+    } catch MachError.invalidName {
+        return false  // Port is dead
+    } catch MachError.invalidTask {
+        return false  // Task no longer exists
+    } catch {
+        print("Unexpected error checking port: \(error)")
+        return false
+    }
+}
+```
+
+### Debugging Port Leaks
+
+Port leaks consume kernel resources:
+
+```swift
+// List all ports in current task
+let currentTask = Mach.Task.current
+let portsBefore = try currentTask.ports.count
+
+// Perform some operation
+performPortOperation()
+
+let portsAfter = try currentTask.ports.count
+let leaked = portsAfter - portsBefore
+
+if leaked > 0 {
+    print("Warning: \(leaked) ports leaked")
+}
+```
+
+## Debugging Memory Operations
+
+### Virtual Memory Region Inspection
+
+```swift
+let vm = Mach.Task.current.vm
+
+// Walk through memory regions
+var pointer: UnsafeRawPointer? = UnsafeRawPointer(bitPattern: 0x100000000)
+
+while let currentPtr = pointer {
+    do {
+        let (info, size) = try vm.region(
+            &pointer,
+            flavor: .basic,
+            as: vm_region_basic_info_64.self
+        )
+        
+        print("Region at \(String(format: "0x%016llx", UInt64(bitPattern: currentPtr)))")
+        print("  Size: \(size) bytes")
+        print("  Protection: \(formatProtection(info.protection))")
+        print("  Max Protection: \(formatProtection(info.max_protection))")
+        
+        // Move to next region
+        pointer = currentPtr.advanced(by: Int(size))
+    } catch MachError.invalidAddress {
+        break  // No more regions
+    } catch {
+        print("Error reading region: \(error)")
+        break
+    }
+}
+
+func formatProtection(_ prot: vm_prot_t) -> String {
+    var result = ""
+    result += (prot & VM_PROT_READ != 0) ? "r" : "-"
+    result += (prot & VM_PROT_WRITE != 0) ? "w" : "-"
+    result += (prot & VM_PROT_EXECUTE != 0) ? "x" : "-"
+    return result
+}
+```
+
+<Note>
+  Memory regions are contiguous areas with the same protection attributes. Walking regions helps understand the memory layout of a process.
+</Note>
+
+### Debugging Memory Read/Write Failures
+
+```swift
+func safeMemoryRead(vm: Mach.VirtualMemoryManager, address: UnsafeRawPointer?, size: mach_vm_size_t) -> Data? {
+    var regionPtr = address
+    
+    // Check if region is readable
+    guard let basicInfo = try? vm.regionBasicInfo(&regionPtr),
+          basicInfo.protection & VM_PROT_READ != 0 else {
+        print("Region at \(String(describing: address)) is not readable")
+        return nil
+    }
+    
+    // Attempt read
+    do {
+        let buffer = try vm.read(from: address, size: size)
+        return Data(buffer)
+    } catch MachError.invalidAddress {
+        print("Invalid address: \(String(describing: address))")
+        return nil
+    } catch MachError.protection {
+        print("Protection violation reading address")
+        return nil
+    } catch {
+        print("Error reading memory: \(error)")
+        return nil
+    }
+}
+```
+
+## Debugging Thread State
+
+Thread state operations are complex and error-prone:
+
+### Examining Thread State
+
+```swift
+let thread = Mach.Thread.current
+
+do {
+    // Get ARM64 thread state
+    let state = try thread.getState(Mach.ThreadState<arm_thread_state64_t>.self)
+    
+    print("ARM64 Thread State:")
+    print("  PC: 0x\(String(format: "%016llx", state.data.__pc))")
+    print("  SP: 0x\(String(format: "%016llx", state.data.__sp))")
+    print("  LR: 0x\(String(format: "%016llx", state.data.__lr))")
+} catch MachError.invalidArgument {
+    print("Invalid thread state flavor for this architecture")
+} catch {
+    print("Failed to get thread state: \(error)")
+}
+```
+
+<Warning>
+  Thread state structures are architecture-specific. Always verify you're using the correct structure for your target architecture (x86_64, ARM64, etc.).
+</Warning>
+
+### Debugging Thread Suspension
+
+```swift
+let threads = try task.threads
+
+for thread in threads {
+    do {
+        // Suspend thread
+        try thread.suspend()
+        
+        // Get thread info
+        let info = try thread.getInfo(.basic)
+        print("Thread suspended: suspend_count = \(info.suspend_count)")
+        
+        // Resume thread
+        try thread.resume()
+    } catch {
+        print("Error managing thread \(thread.name): \(error)")
+    }
+}
+```
+
+<Tip>
+  Use `suspend2()` and `resume2()` for more reliable suspension with tokens:
+  ```swift
+  let token = try task.suspend2()
+  defer { try? task.resume2(token: token) }
+  // Perform suspended operations
+  ```
+</Tip>
+
+## Debugging Message Passing
+
+Mach IPC messages can fail in many ways:
+
+### Debugging MIG Errors
+
+```swift
+import MachCore
+
+do {
+    let client = Mach.MIGClient(
+        serverPort: serverPort,
+        requestID: 1000,
+        replyID: 1100
+    )
+    
+    try client.sendRequest(
+        payload: requestPayload,
+        replyHandler: { reply in
+            print("Got reply: \(reply)")
+        }
+    )
+} catch let error as Mach.MIGError {
+    // Handle MIG-specific errors
+    print("MIG error: \(error.localizedDescription)")
+    
+    switch error.code {
+    case Mach.MIGErrorCode.badID.rawValue:
+        print("Server doesn't recognize this message ID")
+    case Mach.MIGErrorCode.badArguments.rawValue:
+        print("Invalid arguments in message")
+    case Mach.MIGErrorCode.serverDied.rawValue:
+        print("Server process terminated")
+    default:
+        print("MIG error code: \(error.code)")
+    }
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+### Message Header Debugging
+
+```swift
+let message = Mach.Message()
+message.header.msgh_remote_port = remotePort.name
+message.header.msgh_local_port = replyPort.name
+message.header.msgh_bits = MACH_MSGH_BITS(
+    MACH_MSG_TYPE_COPY_SEND,
+    MACH_MSG_TYPE_MAKE_SEND_ONCE
+)
+
+print("Message header:")
+print("  Remote port: 0x\(String(format: "%x", message.header.msgh_remote_port))")
+print("  Local port: 0x\(String(format: "%x", message.header.msgh_local_port))")
+print("  Bits: 0x\(String(format: "%x", message.header.msgh_bits))")
+print("  Size: \(message.header.msgh_size)")
+```
+
+## Using System Tools
+
+Combine Kass with macOS debugging tools:
+
+### lldb Integration
+
+Debug your Kass-based tools with lldb:
+
+```bash
+# Launch with lldb
+lldb YourTool
+
+# Set breakpoint before kernel call
+(lldb) b task_for_pid
+
+# Run and inspect
+(lldb) run
+(lldb) register read
+(lldb) memory read $rdi  # First argument
+```
+
+### dtruss and dtrace
+
+Trace system calls and Mach traps:
+
+```bash
+# Trace Mach traps
+sudo dtruss -t mach_msg,mach_port_allocate ./YourTool
+
+# Trace specific process
+sudo dtrace -n 'syscall:::entry /execname == "YourTool"/ { printf("%s", probefunc); }'
+```
+
+### lsmp - List Mach Ports
+
+Inspect ports in a running process:
+
+```bash
+# List all ports
+sudo lsmp <pid>
+
+# Get detailed port info
+sudo lsmp -v <pid>
+```
+
+## Common Issues and Solutions
+
+### Issue: `MachError.failure` on task_for_pid
+
+**Cause:** Insufficient privileges or SIP restrictions
+
+**Solution:**
+```swift
+// Check if running with required privileges
+if getuid() != 0 {
+    print("Warning: Not running as root, task_for_pid may fail")
+}
+
+// Try debug port first (requires debugger entitlement)
+if let debugPort = try? Mach.Task.debugPort(forPID: pid) {
+    // Use debug port
+} else {
+    // Fall back to task_for_pid
+    let task = try Mach.Task.forPID(pid)
+}
+```
+
+### Issue: `MachError.invalidAddress` on vm operations
+
+**Cause:** Invalid pointer or unmapped memory
+
+**Solution:**
+```swift
+// Validate address is in mapped region
+var regionPtr: UnsafeRawPointer? = targetAddress
+do {
+    let (_, size) = try vm.region(
+        &regionPtr,
+        flavor: .basic,
+        as: vm_region_basic_info_64.self
+    )
+    // Address is valid and in a \(size) byte region starting at regionPtr
+} catch {
+    print("Address not in mapped region")
+}
+```
+
+### Issue: Port rights being automatically destroyed
+
+**Cause:** Port has no-senders notification or task terminated
+
+**Solution:**
+```swift
+// Keep a send right to prevent automatic cleanup
+let port = try Mach.Port.allocate(
+    inTask: .current,
+    withRight: .receive,
+    options: [.insertSendRight]  // Also create send right
+)
+```
+
+### Issue: Thread state modifications not taking effect
+
+**Cause:** Thread is running while state is being modified
+
+**Solution:**
+```swift
+// Suspend thread before modifying state
+try thread.suspend()
+defer { try? thread.resume() }
+
+var state = try thread.getState(Mach.ThreadState<arm_thread_state64_t>.self)
+state.data.__pc = newPC
+try thread.setState(state)
+```
+
+## Logging and Diagnostics
+
+Add comprehensive logging to your Kass code:
+
+```swift
+import os.log
+
+let logger = Logger(subsystem: "com.example.research", category: "mach")
+
+func getTaskPort(for pid: pid_t) throws -> Mach.Task {
+    logger.debug("Attempting to get task port for PID \(pid)")
+    
+    do {
+        let task = try Mach.Task.forPID(pid)
+        logger.info("Successfully obtained task port: \(task.name)")
+        return task
+    } catch {
+        logger.error("Failed to get task port: \(error.localizedDescription)")
+        throw error
+    }
+}
+```
+
+<Tip>
+  Use `os_log` for debugging - it provides subsystem filtering and works with Console.app for viewing logs.
+</Tip>
+
+## Debug Build Recommendations
+
+When developing with Kass:
+
+1. **Enable address sanitizer** to catch memory errors:
+   ```bash
+   swift build -c debug -Xswiftc -sanitize=address
+   ```
+
+2. **Use assertions** for invariants:
+   ```swift
+   precondition(port.name != MACH_PORT_NULL, "Port must be valid")
+   ```
+
+3. **Enable verbose error messages**:
+   ```swift
+   #if DEBUG
+   logger.log(level: .debug, "Detailed error info...")
+   #endif
+   ```
+
+4. **Add debug descriptions** to your types:
+   ```swift
+   extension MyType: CustomDebugStringConvertible {
+       var debugDescription: String {
+           "MyType(task: \(task.debugDescription), status: \(status))"
+       }
+   }
+   ```

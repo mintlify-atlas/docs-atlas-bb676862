@@ -1,0 +1,436 @@
+---
+title: Thread API
+description: API reference for Mach thread types, operations, and state management in the Kass Swift library
+---
+
+# Thread API
+
+The Thread API provides Swift-friendly access to Mach threads, which are the unit of CPU execution within tasks.
+
+## Core Types
+
+### Mach.Thread
+
+A thread in a task.
+
+```swift
+public class Thread: Mach.Port
+```
+
+#### Static Properties
+
+<ResponseField name="current" type="Mach.ThreadControl">
+  The current thread
+  
+  ```swift
+  public static var current: Mach.ThreadControl
+  ```
+</ResponseField>
+
+#### Initializers
+
+```swift
+public convenience init(inTask task: Task) throws
+```
+
+Creates a new thread in a given task.
+
+**Warning:** The initial execution state of the thread is undefined. Use `init(inTask:runningWithState:)` to create a thread with a defined initial state.
+
+---
+
+```swift
+public convenience init<DataType>(
+    inTask task: Task,
+    runningWithState state: ThreadState<DataType>
+) throws where DataType: BitwiseCopyable
+```
+
+Creates a new running thread in a given task with a given state.
+
+#### Instance Properties
+
+<ResponseField name="info" type="Mach.ThreadInfoManager">
+  The thread's info manager
+  
+  ```swift
+  public var info: Mach.ThreadInfoManager
+  ```
+</ResponseField>
+
+<ResponseField name="tsdAddress" type="UnsafeMutableRawPointer?">
+  The address of the thread-specific data (TSD) for the thread
+  
+  ```swift
+  public var tsdAddress: UnsafeMutableRawPointer?
+  ```
+</ResponseField>
+
+#### Methods
+
+```swift
+public func suspend() throws
+```
+
+Suspends the thread.
+
+---
+
+```swift
+public func resume() throws
+```
+
+Resumes the thread.
+
+---
+
+```swift
+public func abort(safely: Bool = true) throws
+```
+
+Aborts the thread.
+
+<ParamField path="safely" type="Bool" default="true">
+  Whether to abort safely
+</ParamField>
+
+---
+
+```swift
+public func terminate() throws
+```
+
+Terminates the thread.
+
+---
+
+```swift
+public func wire(in host: Mach.Host = .current) throws
+```
+
+Wires a thread to prevent it from being paged out.
+
+---
+
+```swift
+public func unwire(in host: Mach.Host = .current) throws
+```
+
+Unwires a thread.
+
+---
+
+```swift
+public static func switch(
+    to thread: Mach.Thread,
+    option: Mach.ThreadSwitchOption = .none,
+    timeout: mach_msg_timeout_t
+) throws
+```
+
+Switches to a thread.
+
+---
+
+```swift
+public func abortDepression() throws
+```
+
+Aborts the depression of the thread.
+
+**Note:** A thread may be in a depressed state due to a thread switching call.
+
+---
+
+```swift
+public func getState<DataType>(_ state: Mach.ThreadState<DataType>) throws -> DataType
+```
+
+Gets state for the thread.
+
+**Warning:** This call will fail if data is included in the state argument.
+
+---
+
+```swift
+public func setState<DataType>(_ state: Mach.ThreadState<DataType>) throws
+```
+
+Sets state for the thread.
+
+**Warning:** This call will fail if data is not included in the state argument.
+
+## Thread State
+
+### Mach.ThreadState
+
+A flavor of thread state, optionally with paired data.
+
+```swift
+public struct ThreadState<StateDataType: BitwiseCopyable>
+```
+
+<ResponseField name="flavorKey" type="thread_state_flavor_t">
+  The thread state flavor key
+</ResponseField>
+
+<ResponseField name="data" type="DataType?">
+  The optional state data
+</ResponseField>
+
+#### ARM Thread States
+
+**Available on ARM architectures only:**
+
+<ParamField path="arm32" type="ThreadState<arm_thread_state32_t>">
+  ARM state (32-bit)
+</ParamField>
+
+<ParamField path="arm64" type="ThreadState<arm_thread_state64_t>">
+  ARM state (64-bit)
+</ParamField>
+
+<ParamField path="arm32Exception" type="ThreadState<arm_exception_state32_t>">
+  ARM exception state (32-bit)
+</ParamField>
+
+<ParamField path="arm64Exception" type="ThreadState<arm_exception_state64_t>">
+  ARM exception state (64-bit)
+</ParamField>
+
+<ParamField path="arm64ExceptionV2" type="ThreadState<arm_exception_state64_v2_t>">
+  ARM exception state (64-bit, version 2)
+</ParamField>
+
+<ParamField path="arm32Debug" type="ThreadState<arm_debug_state32_t>">
+  ARM debug state (32-bit)
+</ParamField>
+
+<ParamField path="arm64Debug" type="ThreadState<arm_debug_state64_t>">
+  ARM debug state (64-bit)
+</ParamField>
+
+<ParamField path="armPageIn" type="ThreadState<arm_pagein_state_t>">
+  ARM page-in state
+</ParamField>
+
+<ParamField path="armVFP" type="ThreadState<arm_vfp_state_t>">
+  ARM VFP state
+</ParamField>
+
+#### x86 Thread States
+
+**Available on x86 architectures only:**
+
+<ParamField path="x86_32" type="ThreadState<x86_thread_state32_t>">
+  x86 state (32-bit)
+</ParamField>
+
+<ParamField path="x86_64" type="ThreadState<x86_thread_state64_t>">
+  x86 state (64-bit)
+</ParamField>
+
+<ParamField path="x86_64Full" type="ThreadState<x86_thread_full_state64_t>">
+  x86 state (64-bit, full)
+</ParamField>
+
+<ParamField path="x86_32Exception" type="ThreadState<x86_exception_state32_t>">
+  x86 exception state (32-bit)
+</ParamField>
+
+<ParamField path="x86_64Exception" type="ThreadState<x86_exception_state64_t>">
+  x86 exception state (64-bit)
+</ParamField>
+
+<ParamField path="x86_32Debug" type="ThreadState<x86_debug_state32_t>">
+  x86 debug state (32-bit)
+</ParamField>
+
+<ParamField path="x86_64Debug" type="ThreadState<x86_debug_state64_t>">
+  x86 debug state (64-bit)
+</ParamField>
+
+<ParamField path="x86PageIn" type="ThreadState<x86_pagein_state_t>">
+  x86 page-in state
+</ParamField>
+
+<ParamField path="x86Instruction" type="ThreadState<x86_instruction_state_t>">
+  x86 instruction state
+</ParamField>
+
+#### Common States
+
+<ParamField path="none" type="ThreadState<()>">
+  No thread state
+</ParamField>
+
+## Thread Info
+
+### Mach.ThreadInfoManager
+
+Manages thread information retrieval.
+
+```swift
+public struct ThreadInfoManager
+```
+
+#### Methods
+
+```swift
+public func get<DataType>(
+    _ flavor: Mach.ThreadInfoFlavor,
+    as type: DataType.Type = DataType.self
+) throws -> DataType where DataType: BitwiseCopyable
+```
+
+Gets the thread's info.
+
+#### Info Properties
+
+<ResponseField name="basicInfo" type="thread_basic_info">
+  Basic information about the thread (throws on failure)
+</ResponseField>
+
+<ResponseField name="identifyingInfo" type="thread_identifier_info">
+  Identifying information about the thread (throws on failure)
+</ResponseField>
+
+<ResponseField name="extendedInfo" type="thread_extended_info">
+  Extended information about the thread (throws on failure)
+</ResponseField>
+
+### Mach.ThreadInfoFlavor
+
+A flavor of thread info.
+
+```swift
+public struct ThreadInfoFlavor
+```
+
+<ParamField path="basic" type="ThreadInfoFlavor">
+  Basic information about the thread
+</ParamField>
+
+<ParamField path="identifier" type="ThreadInfoFlavor">
+  Identifying information about the thread
+</ParamField>
+
+<ParamField path="extended" type="ThreadInfoFlavor">
+  Extended information about the thread
+</ParamField>
+
+## Thread Run State
+
+### Mach.ThreadRunState
+
+A run state of a thread.
+
+```swift
+public struct ThreadRunState
+```
+
+<ParamField path="running" type="ThreadRunState">
+  The thread is running normally
+</ParamField>
+
+<ParamField path="stopped" type="ThreadRunState">
+  The thread is stopped
+</ParamField>
+
+<ParamField path="waiting" type="ThreadRunState">
+  The thread is waiting normally
+</ParamField>
+
+<ParamField path="uninterruptible" type="ThreadRunState">
+  The thread is in an uninterruptible wait
+</ParamField>
+
+<ParamField path="halted" type="ThreadRunState">
+  The thread is halted at a clean point
+</ParamField>
+
+### thread_basic_info Extension
+
+```swift
+extension thread_basic_info {
+    public var runState: Mach.ThreadRunState
+}
+```
+
+The thread's run state from `thread_basic_info`.
+
+## Thread Switching
+
+### Mach.ThreadSwitchOption
+
+A thread switching option.
+
+```swift
+public struct ThreadSwitchOption
+```
+
+<ParamField path="none" type="ThreadSwitchOption">
+  No special option
+</ParamField>
+
+<ParamField path="depress" type="ThreadSwitchOption">
+  Depress the thread's priority
+</ParamField>
+
+<ParamField path="wait" type="ThreadSwitchOption">
+  Wait for the specified timeout
+</ParamField>
+
+## Usage Example
+
+```swift
+import Mach
+
+// Get the current thread
+let thread = Mach.Thread.current
+
+// Get basic info
+let basicInfo = try thread.info.basicInfo
+print("User time: \(basicInfo.user_time)")
+print("System time: \(basicInfo.system_time)")
+print("Run state: \(basicInfo.runState)")
+
+// Get identifier info
+let identifierInfo = try thread.info.identifyingInfo
+print("Thread ID: \(identifierInfo.thread_id)")
+
+// Suspend and resume
+try thread.suspend()
+defer { try? thread.resume() }
+
+// Create a new thread in the current task
+let task = Mach.Task.current
+let newThread = try Mach.Thread(inTask: task)
+defer { try? newThread.terminate() }
+
+// Work with thread state (ARM64 example)
+#if arch(arm64)
+let state = try newThread.getState(.arm64)
+print("PC: \(state.__pc)")
+print("SP: \(state.__sp)")
+
+// Modify and set state
+var modifiedState = state
+modifiedState.__pc = 0x1000  // Set program counter
+try newThread.setState(.arm64(modifiedState))
+#endif
+
+// Get all threads in a task
+let threads = try task.threads
+for (index, t) in threads.enumerated() {
+    let info = try t.info.basicInfo
+    print("Thread \(index): \(info.runState)")
+}
+
+// Switch to a thread
+try Mach.Thread.switch(
+    to: threads.first!,
+    option: .none,
+    timeout: 1000
+)
+```

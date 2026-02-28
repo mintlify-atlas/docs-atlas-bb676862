@@ -1,0 +1,157 @@
+---
+title: Installation
+description: Add Kass to your Swift project using Swift Package Manager
+---
+
+# Installation
+
+Kass is distributed as a Swift package and can be added to your project using Swift Package Manager.
+
+## Requirements
+
+- **Swift**: 6.2 or later
+- **Platform**: macOS 10.13+ or iOS 12.0+
+- **Xcode**: Latest stable release recommended
+
+<Note>
+  While Kass may compile on older macOS versions, it is only thoroughly tested on the latest macOS release.
+</Note>
+
+## Add Kass to your Package.swift
+
+<Steps>
+  <Step title="Open your Package.swift file">
+    Navigate to your Swift package's `Package.swift` file in your project root.
+  </Step>
+
+  <Step title="Add Kass as a dependency">
+    Add the Kass repository to your package's dependencies array:
+
+    ```swift Package.swift
+    let package = Package(
+        name: "YourPackage",
+        dependencies: [
+            .package(url: "https://github.com/nmggithub/Kass", exact: "4.0.0"),
+        ],
+        // ...
+    )
+    ```
+
+    <Tip>
+      Use `exact:` to pin to a specific version for stability, or use `from:` to allow minor version updates.
+    </Tip>
+  </Step>
+
+  <Step title="Add module dependencies to your target">
+    Add the Kass modules you need to your target's dependencies:
+
+    ```swift Package.swift
+    targets: [
+        .executableTarget(
+            name: "YourTarget",
+            dependencies: [
+                .product(name: "MachCore", package: "Kass")
+            ]
+        )
+    ]
+    ```
+  </Step>
+</Steps>
+
+## Available modules
+
+Kass provides several modules that can be imported independently:
+
+<CardGroup cols={2}>
+  <Card title="Kass" icon="cube">
+    Umbrella module providing access to MachCore and BSDCore
+  </Card>
+  <Card title="MachCore" icon="gear">
+    Mach kernel interface (most stable)
+  </Card>
+  <Card title="BSDCore" icon="terminal">
+    BSD kernel interface (work in progress)
+  </Card>
+  <Card title="Linking" icon="link">
+    Symbol access via dlopen/dlsym
+  </Card>
+  <Card title="OSCore" icon="apple">
+    macOS-specific features (IOKit, notifications)
+  </Card>
+  <Card title="Shellcode" icon="code">
+    Shellcode generation and injection utilities
+  </Card>
+</CardGroup>
+
+## Complete example
+
+Here's a complete `Package.swift` example:
+
+```swift Package.swift
+// swift-tools-version: 6.2
+import PackageDescription
+
+let package = Package(
+    name: "MySecurityTool",
+    platforms: [
+        .macOS(.v10_13),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/nmggithub/Kass", exact: "4.0.0"),
+    ],
+    targets: [
+        .executableTarget(
+            name: "MySecurityTool",
+            dependencies: [
+                .product(name: "MachCore", package: "Kass")
+            ]
+        )
+    ]
+)
+```
+
+## Import modules in your code
+
+Once you've added Kass to your package, import the modules you need:
+
+```swift main.swift
+import MachCore
+
+// Start using Kass!
+let task = Mach.Task.current
+print("Current task PID: \(try task.pid)")
+```
+
+## Handling naming collisions
+
+If a Kass module name collides with an existing module in your package, use the `moduleAliases` option:
+
+```swift Package.swift
+targets: [
+    .executableTarget(
+        name: "YourTarget",
+        dependencies: [
+            .product(name: "MachCore", package: "Kass")
+        ],
+        moduleAliases: [
+            "MachCore": "KassMachCore"
+        ]
+    )
+]
+```
+
+Then import with the alias:
+
+```swift
+import KassMachCore
+```
+
+<Warning>
+  Module aliasing requires Swift 5.7 or later.
+</Warning>
+
+## Next steps
+
+<Card title="Quick start guide" icon="rocket" href="/quickstart">
+  Follow the quick start guide to write your first Kass program
+</Card>

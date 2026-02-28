@@ -1,0 +1,409 @@
+---
+title: Mach Kernel Fundamentals
+description: Deep dive into Mach ports, tasks, threads, port rights, and message queues
+---
+
+## Core Concepts
+
+Mach is a microkernel that provides the low-level primitives for XNU. Understanding Mach fundamentals is essential for working with the Kass library.
+
+## Ports and Port Names
+
+### What is a Port?
+
+In Mach, a **port** is the fundamental IPC mechanism. Ports are held in kernel space and are traditionally **message queues**.
+
+<Info>
+A Mach port is essentially a kernel-protected message queue with associated access rights.
+</Info>
+
+### Port Names
+
+Tasks don't directly access ports. Instead, they use **port names** - integers that reference ports:
+
+```swift
+import MachCore
+
+// Port names are mach_port_name_t integers
+let port = Mach.Port(named: 0x1234, inNameSpaceOf: .current)
+
+// Each port has a name in its owning task's namespace
+print("Port name: 0x\(String(port.name, radix: 16))")
+```
+
+<Note>
+Port names are unique within a task's namespace but cannot be used across tasks. The same port may have different names in different tasks.
+</Note>
+
+## Port Rights
+
+Each task holds **port rights** to underlying kernel ports. These rights control what operations are allowed:
+
+### Types of Port Rights
+
+```swift
+public struct PortRights: OptionSet {
+    // A right to send messages to a port
+    public static let send: Self
+    
+    // A right to receive messages from a port
+    public static let receive: Self
+    
+    // A right to send a single message to a port
+    public static let sendOnce: Self
+    
+    // A special right for managing port sets
+    public static let portSet: Self
+    
+    // A placeholder for a dead port name
+    public static let deadName: Self
+}
+```
+
+<Tabs>
+  <Tab title="Send Rights">
+    ```swift
+    // Send rights allow sending messages to a port
+    let sendRight: Mach.PortRights = .send
+    
+    // Multiple tasks can hold send rights to the same port
+    // A task can hold multiple user references to the same send right
+    ```
+  </Tab>
+  <Tab title="Receive Rights">
+    ```swift
+    // Receive rights allow receiving messages from a port
+    let receiveRight: Mach.PortRights = .receive
+    
+    // Only ONE task can hold the receive right to a port
+    // The receive right is unique and can be moved between tasks
+    ```
+  </Tab>
+  <Tab title="Send-Once Rights">
+    ```swift
+    // Send-once rights allow sending exactly one message
+    let sendOnceRight: Mach.PortRights = .sendOnce
+    
+    // After sending, the right is automatically deallocated
+    // Commonly used for reply ports in RPC patterns
+    ```
+  </Tab>
+</Tabs>
+
+### Querying Port Rights
+
+```swift
+import MachCore
+
+let port = Mach.Port(named: somePortName, inNameSpaceOf: .current)
+
+do {
+    let rights = try port.rights
+    
+    if rights.contains(.receive) {
+        print("We can receive messages from this port")
+    }
+    
+    if rights.contains(.send) {
+        print("We can send messages to this port")
+    }
+    
+    // Check all rights
+    for right in rights.rights {
+        print("Right: \(right.name ?? "unknown")")
+    }
+} catch {
+    print("Error querying port rights: \(error)")
+}
+```
+
+## Port Name Spaces
+
+Each task maintains its own **port name space** - a table mapping port names to port rights:
+
+```swift
+// Each task has its own independent namespace
+let taskA = Mach.Task.current
+let portsInNamespace = try taskA.ports  // All port names in this task
+
+// Get detailed namespace information
+let namespaceInfo = try taskA.nameSpaceInfo
+let namespaceTable = try taskA.nameSpaceTable
+```
+
+<Accordion title="Understanding Port Name Space Architecture">
+The kernel maintains a per-task IPC space structure that contains:
+
+1. **Port name table** - Maps names (integers) to port rights
+2. **Reference counts** - Tracks user references to each right
+3. **Port set memberships** - Groups of ports for collective operations
+
+When you create or receive a port right, the kernel allocates a name in your task's namespace and establishes the mapping.
+</Accordion>
+
+## Tasks
+
+A **task** is Mach's representation of a process. Tasks are the container for resources:
+
+```swift
+import MachCore
+
+// Get the current task
+let currentTask = Mach.Task.current
+
+// Get task PID
+let pid = try currentTask.pid
+print("Task PID: \(pid)")
+
+// Get all threads in the task
+let threads = try currentTask.threads
+print("Task has \(threads.count) threads")
+
+// Task control operations
+try currentTask.suspend()  // Suspend all threads
+try currentTask.resume()   // Resume all threads
+```
+
+### Task Special Ports
+
+Tasks have several special ports for various purposes:
+
+```swift
+// Tasks can "stash" ports for later retrieval
+let portsToStash: [Mach.Port] = [somePort1, somePort2]
+try currentTask.stashPorts(portsToStash)
+
+// Later, retrieve stashed ports
+let stashedPorts = try currentTask.stashedPorts
+```
+
+### Task Operations
+
+<Tabs>
+  <Tab title="Suspension">
+    ```swift
+    // Suspend a task (all its threads)
+    try task.suspend()
+    
+    // Better: Use suspend2 to get a suspension token
+    let token = try task.suspend2()
+    
+    // Resume with the token
+    try task.resume2(token: token)
+    ```
+  </Tab>
+  <Tab title="Termination">
+    ```swift
+    // Terminate a task (kills the process)
+    try task.terminate()
+    
+    // This is a forceful termination
+    // No cleanup handlers are run
+    ```
+  </Tab>
+  <Tab title="Resource Limits">
+    ```swift
+    // Set physical memory footprint limit (in MB)
+    let oldLimit = try task.setPhysicalFootprintLimit(512)
+    print("Previous limit was \(oldLimit) MB")
+    ```
+  </Tab>
+</Tabs>
+
+## Threads
+
+Threads are the unit of execution in Mach:
+
+```swift
+import MachCore
+
+// Get the current thread
+let currentThread = Mach.Thread.current
+
+// Create a new thread in a task
+let newThread = try Mach.Thread(inTask: someTask)
+
+// Create a thread with initial state
+let runningThread = try Mach.Thread(
+    inTask: someTask,
+    runningWithState: threadState
+)
+```
+
+### Thread Control
+
+```swift
+// Suspend/resume a thread
+try thread.suspend()
+try thread.resume()
+
+// Abort a thread (cancels blocking operations)
+try thread.abort(safely: true)
+
+// Terminate a thread
+try thread.terminate()
+
+// Wire/unwire thread memory
+try thread.wire(in: .current)
+try thread.unwire(in: .current)
+```
+
+### Thread Switching
+
+```swift
+// Yield to another thread
+try Mach.Thread.switch(
+    to: otherThread,
+    option: .depress,  // Depress priority temporarily
+    timeout: 1000      // Timeout in milliseconds
+)
+
+// Abort thread depression
+try thread.abortDepression()
+```
+
+## Message Queues
+
+Ports function as message queues, providing the foundation for Mach IPC:
+
+```swift
+import MachCore
+
+// A message queue (port with receive right)
+let queue = Mach.MessageQueue(named: portName)
+
+// Send a message to the queue
+let message = Mach.Message()
+try queue.enqueue(message, timeout: 1000)
+
+// Receive a message from the queue (blocks until message arrives)
+let received = try queue.dequeue(Mach.Message.self, timeout: 5000)
+```
+
+<Warning>
+Receiving from a message queue blocks the calling thread until a message arrives or the timeout expires.
+</Warning>
+
+### Message Clients and Servers
+
+```swift
+// A message client can only send (enqueue)
+let client = Mach.MessageClient(named: portName)
+try client.enqueue(message)
+
+// A message server can only receive (dequeue)
+let server = Mach.MessageServer(named: portName)
+let receivedMsg = try server.dequeue(Mach.Message.self)
+
+// Peek at the next message without removing it
+var seqNum: mach_port_seqno_t = 0
+let peeked = try server.peek(sequenceNumber: &seqNum)
+print("Next message size: \(peeked.size)")
+```
+
+## Port Guards
+
+Port guards protect ports from accidental or malicious manipulation:
+
+```swift
+import MachCore
+
+let port = Mach.Port(named: portName)
+let guardContext: mach_port_context_t = 0xDEADBEEF
+
+// Guard a port with a context value
+try port.guard(with: guardContext, flags: [.strict])
+
+// Now operations on this port require the guard context
+// Attempting to manipulate without the guard will fail
+
+// Unguard when done
+try port.unguard(with: guardContext)
+```
+
+<Info>
+Port guards use a 64-bit context value as a "key". Operations on guarded ports must provide the correct guard context, preventing accidental port manipulation.
+</Info>
+
+### Guard Flags
+
+```swift
+public struct PortGuardFlags: OptionSet {
+    // Strict guarding - more aggressive protection
+    public static let strict: Self
+    
+    // Make the receive right immovable
+    public static let immovableReceive: Self
+}
+
+// Example: Guard with immovable receive right
+try port.guard(
+    with: guardContext,
+    flags: [.strict, .immovableReceive]
+)
+```
+
+## Port Construction
+
+Create new ports with specific properties:
+
+```swift
+import MachCore
+
+// Ports can be constructed with various flags
+let flags: Mach.PortConstructFlags = [
+    .insertSendRight,          // Also create a send right
+    .contextAsGuard,           // Use context as guard
+    .immovableReceive,         // Make receive right immovable
+    .importanceReceiver        // Mark as importance receiver
+]
+```
+
+<Accordion title="Port Construction Flags">
+- **contextAsGuard** - Use the context value as a guard
+- **insertSendRight** - Create both receive and send rights
+- **strict** - Use strict guarding (requires contextAsGuard)
+- **immovableReceive** - Prevent moving the receive right
+- **importanceReceiver** - Mark as importance receiver for QoS
+- **servicePort** - Mark as a service port (init only)
+- **connectionPort** - Mark as a connection port
+- **replyPort** - Mark as a reply port
+- **enforceReplyPortSemantics** - Enforce reply semantics
+</Accordion>
+
+## Summary
+
+<AccordionGroup>
+  <Accordion title="Port Hierarchy">
+    1. Kernel holds **ports** (message queues)
+    2. Tasks access ports via **port names** (integers)
+    3. Port names exist in each task's **port name space**
+    4. Each port name references **port rights**
+    5. Port rights control allowed operations
+  </Accordion>
+  
+  <Accordion title="Key Relationships">
+    - One port can have many send rights across tasks
+    - Only one task can hold the receive right
+    - Port names are task-local (not transferable)
+    - Port rights can be sent in messages
+  </Accordion>
+  
+  <Accordion title="Common Patterns">
+    - Client holds send right, server holds receive right
+    - Send-once rights for reply ports in RPC
+    - Port sets for managing multiple ports
+    - Guards for protecting critical ports
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Message Passing" icon="message" href="/concepts/kernel-interaction">
+    Learn how to send and receive Mach messages
+  </Card>
+  <Card title="BSD Layer" icon="terminal" href="/concepts/bsd-layer">
+    Explore the BSD subsystem
+  </Card>
+</CardGroup>

@@ -1,0 +1,186 @@
+---
+title: System Architecture Overview
+description: Understanding the Kass library architecture and XNU kernel interaction layers
+---
+
+## Overview
+
+Kass is a Swift library designed for reverse-engineering and security research on macOS, providing direct interaction with the XNU kernel. The library is structured around two primary kernel subsystems: Mach and BSD.
+
+<Note>
+Kass is specifically designed for reverse-engineering and security research. While some modules can be useful in production apps, that is not their intended purpose.
+</Note>
+
+## Architecture Layers
+
+### The XNU Kernel
+
+XNU ("X is Not Unix") is a hybrid kernel that combines:
+
+1. **Mach microkernel** - Provides low-level primitives for memory management, IPC, and scheduling
+2. **BSD layer** - Provides POSIX compatibility, file systems, and networking
+3. **IOKit** - Device driver framework (not currently covered by Kass)
+
+```
+┌─────────────────────────────────────┐
+│         User Space Apps             │
+├─────────────────────────────────────┤
+│          Kass Library               │
+│  ┌──────────────┬────────────────┐  │
+│  │  MachCore    │   BSDCore      │  │
+│  └──────────────┴────────────────┘  │
+├─────────────────────────────────────┤
+│         XNU Kernel                  │
+│  ┌──────────────┬────────────────┐  │
+│  │ Mach Layer   │   BSD Layer    │  │
+│  └──────────────┴────────────────┘  │
+└─────────────────────────────────────┘
+```
+
+## Core Modules
+
+### MachCore Module
+
+The most stable and feature-complete module, MachCore provides comprehensive access to Mach kernel primitives:
+
+- **Ports and Port Rights** - IPC mechanism fundamentals
+- **Tasks and Threads** - Process and thread management
+- **Message Passing** - Mach IPC communication
+- **Host Information** - System-level queries
+- **Exception Handling** - Kernel exception port management
+
+<Info>
+The MachCore module is considered mostly stable and has had the most development effort invested.
+</Info>
+
+### BSDCore Module
+
+Provides access to BSD subsystem functionality:
+
+- **System Calls** - Direct syscall wrappers
+- **File System Operations** - Advanced FS attribute management
+- **Process Information** - proc_info syscall interface
+- **Sysctl Interface** - Kernel state queries and modifications
+- **POSIX Spawn** - Process creation APIs
+
+<Warning>
+BSDCore is in active development and should not be considered as stable as MachCore. APIs may be subject to change.
+</Warning>
+
+## Error Handling Pattern
+
+Kass uses Swift's native error handling with typed error codes:
+
+<Tabs>
+  <Tab title="Mach Calls">
+    ```swift
+    import MachCore
+
+    // The Mach.call() function wraps kern_return_t results
+    try Mach.call(task_suspend(task.name))
+    
+    // Automatically throws MachError on non-KERN_SUCCESS
+    do {
+        try Mach.call(someKernelOperation())
+    } catch let error as MachError {
+        print("Mach error: \(error)")
+    }
+    ```
+  </Tab>
+  <Tab title="BSD Calls">
+    ```swift
+    import BSDCore
+
+    // BSD.call() wraps POSIX errno-based calls
+    try BSD.call(some_posix_function())
+    
+    // Throws POSIXError on failure
+    do {
+        let result = try BSD.sysctl("kern.osversion", as: String.self)
+    } catch let error as POSIXError {
+        print("POSIX error: \(error.code)")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Memory Safety
+
+Kass carefully manages unsafe operations through Swift's type system:
+
+```swift
+// Example: Safe wrapper around mach_msg with automatic cleanup
+public func withUnsafeSerializedMessage<T>(
+    _ body: (UnsafeMutablePointer<mach_msg_header_t>) throws -> T
+) rethrows -> T {
+    let headerPointer = self.serialize()
+    defer { headerPointer.deallocate() }  // Automatic cleanup
+    return try body(headerPointer)
+}
+```
+
+<Note>
+Kass uses Swift's ownership model and defer statements to ensure proper resource cleanup, even when dealing with low-level kernel operations.
+</Note>
+
+## Type-Safe Wrappers
+
+Raw kernel types are wrapped in Swift-friendly interfaces:
+
+```swift
+// Port rights as type-safe OptionSet
+public struct PortRights: OptionSet {
+    public static let send = Self(name: "send", rawValue: MACH_PORT_RIGHT_SEND)
+    public static let receive = Self(name: "receive", rawValue: MACH_PORT_RIGHT_RECEIVE)
+    public static let sendOnce = Self(name: "sendOnce", rawValue: MACH_PORT_RIGHT_SEND_ONCE)
+}
+
+// Usage
+let rights: Mach.PortRights = [.send, .receive]
+```
+
+## Namespace Organization
+
+All APIs are organized under namespace structs:
+
+- `Mach` - Mach kernel operations
+- `BSD` - BSD subsystem operations
+- `BSD.Proc` - Process-related operations
+- `BSD.FS` - File system operations
+
+```swift
+import MachCore
+import BSDCore
+
+// All operations are namespaced
+let currentTask = Mach.Task.current
+let kernelVersion = try BSD.sysctl("kern.version", as: String.self)
+```
+
+## Platform Requirements
+
+<Info>
+Kass is designed for macOS and requires:
+- Swift 5.9 or later
+- macOS 11.0 or later for most APIs
+- Some APIs require specific macOS versions (annotated with @available)
+</Info>
+
+While Kass may compile on older versions of macOS, it is only thoroughly tested on the latest version. Deprecated or obsoleted APIs are included but should be assumed untested.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Mach Fundamentals" icon="cube" href="/concepts/mach-fundamentals">
+    Learn about ports, tasks, threads, and message passing
+  </Card>
+  <Card title="BSD Layer" icon="terminal" href="/concepts/bsd-layer">
+    Explore syscalls, file systems, and process management
+  </Card>
+  <Card title="Kernel Interaction" icon="server" href="/concepts/kernel-interaction">
+    Understand how to safely interact with the kernel
+  </Card>
+  <Card title="API Reference" icon="book" href="/api/machcore/ports">
+    Browse the complete API documentation
+  </Card>
+</CardGroup>

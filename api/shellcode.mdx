@@ -1,0 +1,288 @@
+---
+title: 'Shellcode Module'
+description: 'Shellcode generation and task injection for ARM64'
+---
+
+The Shellcode module provides tools for generating ARM64 machine code and injecting it into Mach tasks.
+
+## Protocols
+
+### ShellcodeRepresentable
+
+A protocol for types that can be represented as raw shellcode bytes.
+
+```swift
+public protocol ShellcodeRepresentable {
+    var shellcode: [UInt8] { get }
+}
+```
+
+<ParamField path="shellcode" type="[UInt8]">
+  The raw shellcode bytes
+</ParamField>
+
+---
+
+## Task Injection
+
+Extends `Mach.Task` with shellcode injection capabilities.
+
+### inject(shellcode:stackSize:intoThread:withInitialState:)
+
+Injects shellcode into a target task, either into an existing thread or by creating a new bare Mach thread.
+
+```swift
+public func inject(
+    shellcode: [UInt8],
+    stackSize: mach_vm_size_t = 1024 * 1024,
+    intoThread thread: Mach.Thread? = nil,
+    withInitialState initialState: Mach.ThreadState<some BitwiseCopyable> = .none
+) throws -> (
+    shellcodePointer: UnsafeRawPointer?,
+    stackPointer: UnsafeRawPointer?,
+    thread: Mach.Thread?
+)
+```
+
+<ParamField path="shellcode" type="[UInt8]">
+  The shellcode bytes to inject
+</ParamField>
+
+<ParamField path="stackSize" type="mach_vm_size_t" default="1024 * 1024">
+  Size of the stack to allocate (default: 1MB)
+</ParamField>
+
+<ParamField path="thread" type="Mach.Thread?" default="nil">
+  Existing thread to inject into, or `nil` to create a new thread
+</ParamField>
+
+<ParamField path="initialState" type="Mach.ThreadState<some BitwiseCopyable>" default=".none">
+  Initial thread state to set before execution
+</ParamField>
+
+<ResponseField name="Returns" type="tuple">
+  A tuple containing:
+  - `shellcodePointer`: Pointer to the injected shellcode in the target task
+  - `stackPointer`: Pointer to the allocated stack
+  - `thread`: The thread that will execute the shellcode
+</ResponseField>
+
+<Warning>
+  - A bare Mach thread cannot do much without an associated POSIX thread. It is up to the caller to create and associate a POSIX thread.
+  - Injecting into a running thread may cause unexpected behavior.
+  - This currently only supports ARM64 architecture.
+</Warning>
+
+#### Example
+
+```swift
+import Shellcode
+import MachCore
+
+// Create shellcode (ARM64 NOP instruction)
+let shellcode: [UInt8] = [
+    0x1F, 0x20, 0x03, 0xD5  // NOP
+]
+
+// Get target task
+let task = try Mach.Task.forPID(1234)
+
+// Inject shellcode into a new thread
+let (codePtr, stackPtr, thread) = try task.inject(
+    shellcode: shellcode,
+    stackSize: 2 * 1024 * 1024
+)
+
+print("Shellcode injected at: \(codePtr!)")
+print("Stack allocated at: \(stackPtr!)")
+print("Thread: \(thread!)")
+
+// Resume the thread to execute shellcode
+try thread?.resume()
+```
+
+---
+
+## A64 Instruction Set
+
+The module includes a comprehensive ARM64 instruction encoder.
+
+### A64InstructionSet
+
+```swift
+public struct A64InstructionSet: InstructionSet {
+    public struct Instruction: Shellcode.Instruction {
+        public typealias EncodedForm = UInt32
+        public var rawValue: [UInt8]
+    }
+}
+```
+
+### Available Instructions
+
+The `A64InstructionSet.Instruction` type provides static methods for encoding ARM64 instructions.
+
+#### Data Processing Instructions
+
+<CodeGroup>
+
+```swift ADD
+// Add immediate
+A64InstructionSet.Instruction.ADD(Xd: 0, Xn: 1, imm: 42, shift: false)
+A64InstructionSet.Instruction.ADD(Wd: 0, Wn: 1, imm: 42, shift: false)
+```
+
+```swift SUB
+// Subtract immediate
+A64InstructionSet.Instruction.SUB(Xd: 0, Xn: 1, imm: 10, shift: false)
+A64InstructionSet.Instruction.SUB(Wd: 0, Wn: 1, imm: 10, shift: false)
+```
+
+```swift MOV
+// Move register
+A64InstructionSet.Instruction.MOV(Xd: 0, Xn: 1)
+A64InstructionSet.Instruction.MOV(Wd: 0, Wn: 1)
+```
+
+```swift MOVZ
+// Move with zero
+A64InstructionSet.Instruction.MOVZ(Xd: 0, imm: 0x1234, shift: 0)
+```
+
+</CodeGroup>
+
+#### Logical Instructions
+
+<CodeGroup>
+
+```swift AND
+A64InstructionSet.Instruction.AND(Xd: 0, Xn: 1, imm: 0xFF)
+```
+
+```swift ORR
+A64InstructionSet.Instruction.ORR(Xd: 0, Xn: 1, imm: 0xFF)
+```
+
+```swift EOR
+A64InstructionSet.Instruction.EOR(Xd: 0, Xn: 1, imm: 0xFF)
+```
+
+</CodeGroup>
+
+#### Branch Instructions
+
+<CodeGroup>
+
+```swift B
+// Unconditional branch
+A64InstructionSet.Instruction.B(label: 16)
+
+// Conditional branch
+A64InstructionSet.Instruction.B(cond: .EQ, label: 16)
+```
+
+```swift BL
+// Branch with link
+A64InstructionSet.Instruction.BL(label: 16)
+```
+
+```swift BR
+// Branch to register
+A64InstructionSet.Instruction.BR(Xn: 0)
+```
+
+```swift BLR
+// Branch with link to register
+A64InstructionSet.Instruction.BLR(Xn: 0)
+```
+
+</CodeGroup>
+
+#### Branch Conditions
+
+```swift
+public enum BranchCondition: UInt8 {
+    case EQ  // Equal
+    case NE  // Not equal
+    case CS  // Carry set
+    case CC  // Carry clear
+    case MI  // Minus/negative
+    case PL  // Plus/positive or zero
+    case VS  // Overflow
+    case VC  // No overflow
+    case HI  // Unsigned higher
+    case LS  // Unsigned lower or same
+    case GE  // Signed greater than or equal
+    case LT  // Signed less than
+    case GT  // Signed greater than
+    case LE  // Signed less than or equal
+    case AL  // Always
+    case NV  // Never
+}
+```
+
+#### Bitfield Instructions
+
+<CodeGroup>
+
+```swift LSL
+// Logical shift left
+A64InstructionSet.Instruction.LSL(Xd: 0, Xn: 1, shift: 8)
+```
+
+```swift LSR
+// Logical shift right
+A64InstructionSet.Instruction.LSR(Xd: 0, Xn: 1, shift: 8)
+```
+
+```swift ASR
+// Arithmetic shift right
+A64InstructionSet.Instruction.ASR(Xd: 0, Xn: 1, shift: 8)
+```
+
+</CodeGroup>
+
+#### Compare Instructions
+
+<CodeGroup>
+
+```swift CMP
+A64InstructionSet.Instruction.CMP(Xn: 0, imm: 42, shift: false)
+```
+
+```swift CMN
+A64InstructionSet.Instruction.CMN(Xn: 0, imm: 42, shift: false)
+```
+
+```swift TST
+A64InstructionSet.Instruction.TST(Xn: 0, imm: 0xFF)
+```
+
+</CodeGroup>
+
+### Complete Example
+
+```swift
+import Shellcode
+import MachCore
+
+// Build ARM64 shellcode using instruction encoder
+let instructions: [A64InstructionSet.Instruction] = [
+    .MOVZ(Xd: 0, imm: 42, shift: 0),      // X0 = 42
+    .ADD(Xd: 0, Xn: 0, imm: 8, shift: false),  // X0 += 8
+    .BR(Xn: 30)                            // Return
+]
+
+// Convert to raw bytes
+let shellcode = instructions.shellcode
+
+// Inject into task
+let task = try Mach.Task.forPID(1234)
+let result = try task.inject(shellcode: shellcode)
+
+print("Injected \(shellcode.count) bytes at \(result.shellcodePointer!)")
+```
+
+<Info>
+  The A64 instruction set implementation is based on the ARM Architecture Reference Manual (ARM DDI 0487).
+</Info>

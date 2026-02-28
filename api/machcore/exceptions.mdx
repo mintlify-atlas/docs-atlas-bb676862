@@ -1,0 +1,517 @@
+---
+title: Exception API
+description: API reference for Mach exception handling, exception ports, and exception types in the Kass Swift library
+---
+
+# Exception API
+
+The Exception API provides Swift-friendly access to Mach exception handling, which allows applications to intercept and handle hardware and software exceptions.
+
+## Core Types
+
+### Mach.ExceptionPort
+
+An exception port.
+
+```swift
+public class ExceptionPort: Mach.Port
+```
+
+<ResponseField name="mask" type="Mach.ExceptionMask">
+  The mask of the exception types that the port will catch
+</ResponseField>
+
+<ResponseField name="behavior" type="Mach.ExceptionBehavior">
+  The behavior of the exception
+</ResponseField>
+
+<ResponseField name="threadStateFlavor" type="thread_state_flavor_t">
+  The flavor of the thread state to send with exception messages
+</ResponseField>
+
+#### Initializer
+
+```swift
+public init(
+    named name: mach_port_name_t,
+    mask: Mach.ExceptionMask = .all,
+    behavior: Mach.ExceptionBehavior = .default,
+    threadStateFlavor: Mach.ThreadState<some BitwiseCopyable> = .none
+)
+```
+
+Creates an exception port.
+
+<ParamField path="name" type="mach_port_name_t" required>
+  The port name
+</ParamField>
+
+<ParamField path="mask" type="Mach.ExceptionMask" default=".all">
+  The exception mask
+</ParamField>
+
+<ParamField path="behavior" type="Mach.ExceptionBehavior" default=".default">
+  The exception behavior
+</ParamField>
+
+<ParamField path="threadStateFlavor" type="Mach.ThreadState" default=".none">
+  The thread state flavor
+</ParamField>
+
+#### Methods
+
+```swift
+public func raise(
+    _ type: Mach.ExceptionType,
+    code: Int32,
+    subcode: Int32,
+    inThread thread: Mach.Thread = Mach.Thread.current,
+    inTask task: Mach.Task = Mach.Task.current,
+    wasMaybePACFail: Bool = false
+) throws
+```
+
+Raises an exception.
+
+<ParamField path="type" type="Mach.ExceptionType" required>
+  The type of exception to raise
+</ParamField>
+
+<ParamField path="code" type="Int32" required>
+  Exception code
+</ParamField>
+
+<ParamField path="subcode" type="Int32" required>
+  Exception subcode
+</ParamField>
+
+<ParamField path="thread" type="Mach.Thread" default="Mach.Thread.current">
+  The thread in which the exception occurred
+</ParamField>
+
+<ParamField path="task" type="Mach.Task" default="Mach.Task.current">
+  The task in which the exception occurred
+</ParamField>
+
+<ParamField path="wasMaybePACFail" type="Bool" default="false">
+  Whether this was possibly a PAC (Pointer Authentication Code) failure (ARM only)
+</ParamField>
+
+**Important:** The `wasMaybePACFail` parameter has no effect on non-ARM platforms.
+
+---
+
+#### Static Methods
+
+```swift
+public static func exceptionPorts(
+    forTask task: Mach.Task,
+    mask: Mach.ExceptionMask
+) throws -> [Mach.ExceptionPort]
+```
+
+Gets the exception ports for the task that catch the exception types specified by the mask.
+
+---
+
+```swift
+public static func exceptionPorts(
+    forThread thread: Mach.Thread,
+    mask: Mach.ExceptionMask
+) throws -> [Mach.ExceptionPort]
+```
+
+Gets the exception ports for the thread that catch the exception types specified by the mask.
+
+---
+
+```swift
+public static func exceptionPorts(
+    forHost host: Mach.Host,
+    mask: Mach.ExceptionMask
+) throws -> [Mach.ExceptionPort]
+```
+
+Gets the exception ports for the host that catch the exception types specified by the mask.
+
+---
+
+```swift
+public static func addExceptionPort(
+    _ port: Mach.ExceptionPort,
+    toTask task: Mach.Task
+) throws
+```
+
+Adds an exception port to the task.
+
+---
+
+```swift
+public static func addExceptionPort(
+    _ port: Mach.ExceptionPort,
+    toThread thread: Mach.Thread
+) throws
+```
+
+Adds an exception port to the thread.
+
+---
+
+```swift
+public static func addExceptionPort(
+    _ port: Mach.ExceptionPort,
+    toHost host: Mach.Host
+) throws
+```
+
+Adds an exception port to the host.
+
+## Exception Types
+
+### Mach.ExceptionType
+
+A type of exception.
+
+```swift
+public struct ExceptionType
+```
+
+<ParamField path="badAccess" type="ExceptionType">
+  Bad memory access (e.g., segmentation fault)
+</ParamField>
+
+<ParamField path="badInstruction" type="ExceptionType">
+  Invalid instruction
+</ParamField>
+
+<ParamField path="arithmetic" type="ExceptionType">
+  Arithmetic exception (e.g., divide by zero)
+</ParamField>
+
+<ParamField path="emulation" type="ExceptionType">
+  Emulation exception
+</ParamField>
+
+<ParamField path="software" type="ExceptionType">
+  Software exception
+</ParamField>
+
+<ParamField path="breakpoint" type="ExceptionType">
+  Breakpoint or trace trap
+</ParamField>
+
+<ParamField path="syscall" type="ExceptionType">
+  System call exception
+</ParamField>
+
+<ParamField path="machSyscall" type="ExceptionType">
+  Mach system call exception
+</ParamField>
+
+<ParamField path="rpcAlert" type="ExceptionType">
+  RPC alert
+</ParamField>
+
+<ParamField path="crash" type="ExceptionType">
+  Crash exception
+</ParamField>
+
+<ParamField path="resource" type="ExceptionType">
+  Resource exception (e.g., CPU time limit exceeded)
+</ParamField>
+
+<ParamField path="guard" type="ExceptionType">
+  Guard exception (port guard violation)
+</ParamField>
+
+<ParamField path="corpseNotify" type="ExceptionType">
+  Corpse notification
+</ParamField>
+
+## Exception Masks
+
+### Mach.ExceptionMask
+
+A mask for getting or setting exception ports.
+
+```swift
+public struct ExceptionMask: OptionSet
+```
+
+The exception mask uses the same names as exception types:
+
+<ParamField path="badAccess" type="ExceptionMask">
+  Mask for bad access exceptions
+</ParamField>
+
+<ParamField path="badInstruction" type="ExceptionMask">
+  Mask for bad instruction exceptions
+</ParamField>
+
+<ParamField path="arithmetic" type="ExceptionMask">
+  Mask for arithmetic exceptions
+</ParamField>
+
+<ParamField path="emulation" type="ExceptionMask">
+  Mask for emulation exceptions
+</ParamField>
+
+<ParamField path="software" type="ExceptionMask">
+  Mask for software exceptions
+</ParamField>
+
+<ParamField path="breakpoint" type="ExceptionMask">
+  Mask for breakpoint exceptions
+</ParamField>
+
+<ParamField path="syscall" type="ExceptionMask">
+  Mask for system call exceptions
+</ParamField>
+
+<ParamField path="machSyscall" type="ExceptionMask">
+  Mask for Mach system call exceptions
+</ParamField>
+
+<ParamField path="rpcAlert" type="ExceptionMask">
+  Mask for RPC alert exceptions
+</ParamField>
+
+<ParamField path="crash" type="ExceptionMask">
+  Mask for crash exceptions
+</ParamField>
+
+<ParamField path="resource" type="ExceptionMask">
+  Mask for resource exceptions
+</ParamField>
+
+<ParamField path="guard" type="ExceptionMask">
+  Mask for guard exceptions
+</ParamField>
+
+<ParamField path="corpseNotify" type="ExceptionMask">
+  Mask for corpse notification exceptions
+</ParamField>
+
+<ParamField path="all" type="ExceptionMask">
+  Mask for all exception types
+</ParamField>
+
+#### Properties
+
+<ResponseField name="masks" type="[ExceptionMask]">
+  The individual masks that are contained in the mask
+  
+  ```swift
+  public var masks: [Self]
+  ```
+</ResponseField>
+
+## Exception Behaviors
+
+### Mach.ExceptionBehavior
+
+A behavior for an exception.
+
+```swift
+public struct ExceptionBehavior
+```
+
+<ParamField path="default" type="ExceptionBehavior">
+  Default exception behavior (sends exception message with thread and task identity)
+</ParamField>
+
+<ParamField path="state" type="ExceptionBehavior">
+  Send thread state with the exception
+</ParamField>
+
+<ParamField path="stateIdentity" type="ExceptionBehavior">
+  Send both thread state and identity
+</ParamField>
+
+<ParamField path="identityProtected" type="ExceptionBehavior">
+  Identity protected exception behavior
+</ParamField>
+
+<ParamField path="stateIdentityProtected" type="ExceptionBehavior">
+  State and identity protected exception behavior
+</ParamField>
+
+#### Properties
+
+<ResponseField name="backtracePreferred" type="Bool">
+  Whether backtrace is preferred
+</ResponseField>
+
+<ResponseField name="additionalErrors" type="Bool">
+  Whether additional errors should be sent
+</ResponseField>
+
+<ResponseField name="codes" type="Bool">
+  Whether exception codes should be 64-bit
+</ResponseField>
+
+## Port with Exception Ports Protocol
+
+### Mach.PortWithExceptionPorts
+
+A protocol for ports that can have exception ports.
+
+```swift
+public protocol PortWithExceptionPorts: Mach.Port
+```
+
+Implemented by:
+- `Mach.Task`
+- `Mach.Thread`
+- `Mach.Host`
+
+#### Required Methods
+
+```swift
+func exceptionPorts(mask: Mach.ExceptionMask) throws -> [Mach.ExceptionPort]
+```
+
+Returns the exception ports for the port's kernel object for the types specified by the mask.
+
+---
+
+```swift
+var exceptionPorts: [Mach.ExceptionPort] { get throws }
+```
+
+All the exception ports for the port's kernel object.
+
+---
+
+```swift
+func addExceptionPort(_ exceptionPort: Mach.ExceptionPort) throws
+```
+
+Adds an exception port to the port's kernel object.
+
+### Task Exception Port Extensions
+
+```swift
+extension Mach.Task: Mach.PortWithExceptionPorts {
+    public func swapExceptionPort(with exceptionPort: Mach.ExceptionPort)
+        throws -> [Mach.ExceptionPort]
+}
+```
+
+Swaps an exception port for the task and returns the previous exception ports.
+
+---
+
+```swift
+@available(macOS, introduced: 15.0)
+public func registerHardenedExceptionHandler(
+    _ exceptionPort: Mach.ExceptionPort,
+    signedPCKey: UInt32
+) throws
+```
+
+Registers a hardened exception handler for the task (macOS 15+).
+
+## Usage Example
+
+```swift
+import Mach
+
+// Get the current task
+let task = Mach.Task.current
+
+// Get all current exception ports
+let currentPorts = try task.exceptionPorts
+print("Current exception ports: \(currentPorts.count)")
+
+for port in currentPorts {
+    print("  Mask: \(port.mask)")
+    print("  Behavior: \(port.behavior)")
+    print("  Thread state flavor: \(port.threadStateFlavor)")
+}
+
+// Create a new exception port
+let exceptionPort = Mach.ExceptionPort(
+    named: /* your port name */,
+    mask: [.badAccess, .badInstruction],
+    behavior: .default,
+    threadStateFlavor: .none
+)
+
+// Add the exception port to the current task
+try task.addExceptionPort(exceptionPort)
+
+// Query exception ports for specific exception types
+let crashPorts = try task.exceptionPorts(mask: [.crash, .badAccess])
+print("Ports handling crash and bad access: \(crashPorts.count)")
+
+// Swap exception ports (returns old ports)
+let oldPorts = try task.swapExceptionPort(with: exceptionPort)
+print("Replaced \(oldPorts.count) old exception ports")
+
+// Exception port on a thread
+let thread = Mach.Thread.current
+try thread.addExceptionPort(exceptionPort)
+
+// Raise an exception (for testing)
+try exceptionPort.raise(
+    .software,
+    code: 1,
+    subcode: 0,
+    inThread: thread,
+    inTask: task
+)
+```
+
+## Advanced Usage
+
+### Handling Multiple Exception Types
+
+```swift
+// Create a mask for multiple exception types
+let mask: Mach.ExceptionMask = [
+    .badAccess,
+    .badInstruction,
+    .arithmetic,
+    .breakpoint
+]
+
+// Check what exceptions are in the mask
+for individualMask in mask.masks {
+    print("Handling: \(individualMask)")
+}
+
+// Create exception port for these types
+let port = Mach.ExceptionPort(
+    named: /* port name */,
+    mask: mask,
+    behavior: .stateIdentity,
+    threadStateFlavor: .arm64  // or .x86_64 on Intel
+)
+```
+
+### Exception Handling at Different Levels
+
+```swift
+// Host-level exception handling (catches all tasks)
+let host = Mach.Host.current
+try Mach.ExceptionPort.addExceptionPort(hostExceptionPort, toHost: host)
+
+// Task-level exception handling (catches all threads in task)
+let task = Mach.Task.current
+try Mach.ExceptionPort.addExceptionPort(taskExceptionPort, toTask: task)
+
+// Thread-level exception handling (catches only this thread)
+let thread = Mach.Thread.current
+try Mach.ExceptionPort.addExceptionPort(threadExceptionPort, toThread: thread)
+```
+
+### Exception Port Hierarchy
+
+Exception ports form a hierarchy:
+1. Thread exception ports are checked first
+2. Then task exception ports
+3. Finally host exception ports
+
+The first matching exception port in this hierarchy handles the exception.

@@ -1,0 +1,637 @@
+---
+title: 'Shellcode Module'
+description: 'ARM64 shellcode generation and task injection utilities'
+---
+
+## Overview
+
+The Shellcode module provides utilities for generating and injecting executable code into running tasks on macOS. It currently supports ARM64 architecture and integrates tightly with MachCore for memory and thread operations.
+
+<Warning>
+This module is designed for security research and reverse engineering. Injecting code into processes requires elevated privileges and can be dangerous if used incorrectly.
+</Warning>
+
+<Note>
+**Source Location**: `Sources/Shellcode/`
+
+**Dependencies**: KassHelpers, MachCore
+
+**Supported Architectures**: ARM64 only
+</Note>
+
+## Core Components
+
+### ShellcodeRepresentable Protocol
+
+The fundamental protocol for shellcode objects:
+
+```swift Shellcode.swift:1-6
+public protocol ShellcodeRepresentable {
+    /// The raw shellcode bytes.
+    var shellcode: [UInt8] { get }
+}
+```
+
+Any type conforming to this protocol can be used with the injection system.
+
+## Task Injection
+
+### Basic Injection
+
+Inject shellcode into a target task:
+
+<Tabs>
+  <Tab title="New Thread">
+```swift TaskInjection.swift:14-96
+import MachCore
+import Shellcode
+
+// Get target task
+let targetTask = try Mach.Task.forPID(targetPID)
+
+// Your shellcode (ARM64 instructions)
+let shellcode: [UInt8] = [
+    0xC0, 0x03, 0x5F, 0xD6  // RET instruction
+]
+
+// Inject into new thread
+let (shellcodePtr, stackPtr, thread) = try targetTask.inject(
+    shellcode: shellcode,
+    stackSize: 1024 * 1024  // 1MB stack
+)
+
+print("Injected at: \(shellcodePtr!)")
+print("Stack at: \(stackPtr!)")
+print("Thread: \(thread!)")
+
+// Start execution
+try thread!.resume()
+```
+  </Tab>
+  
+  <Tab title="Existing Thread">
+```swift TaskInjection.swift:24-86
+// Get target task and thread
+let targetTask = try Mach.Task.forPID(targetPID)
+let threads = try targetTask.threads
+let targetThread = threads[0]
+
+// Suspend thread before injection
+try targetThread.suspend()
+
+// Inject into existing thread
+let shellcode: [UInt8] = [
+    // Your ARM64 instructions
+    0x00, 0x00, 0x80, 0xD2,  // MOV X0, #0
+    0xC0, 0x03, 0x5F, 0xD6   // RET
+]
+
+let (shellcodePtr, stackPtr, _) = try targetTask.inject(
+    shellcode: shellcode,
+    intoThread: targetThread
+)
+
+// Resume thread to execute shellcode
+try targetThread.resume()
+```
+  </Tab>
+  
+  <Tab title="Custom Initial State">
+```swift TaskInjection.swift:62-78
+// Prepare custom ARM64 thread state
+var threadState = arm_thread_state64_t()
+threadState.__x[0] = 0x42  // Set X0 register
+threadState.__x[1] = 0x43  // Set X1 register
+
+let initialState = Mach.ThreadState.arm64(threadState)
+
+// Inject with custom state
+let (shellcodePtr, stackPtr, thread) = try targetTask.inject(
+    shellcode: shellcode,
+    stackSize: 2 * 1024 * 1024,  // 2MB stack
+    withInitialState: initialState
+)
+
+print("Custom state applied")
+try thread!.resume()
+```
+  </Tab>
+</Tabs>
+
+### Injection Process
+
+The injection function performs these steps:
+
+1. **Memory Allocation**: Allocates memory in target task
+2. **Write Shellcode**: Writes code to allocated memory
+3. **Set Protection**: Makes memory executable (RX)
+4. **Stack Allocation**: Allocates stack space
+5. **Thread Setup**: Creates/modifies thread with PC pointing to shellcode
+6. **Return**: Returns pointers and thread handle
+
+```swift TaskInjection.swift:32-96
+public func inject(
+    shellcode: [UInt8],
+    stackSize: mach_vm_size_t = 1024 * 1024,
+    intoThread thread: Mach.Thread? = nil,
+    withInitialState initialState: Mach.ThreadState<some BitwiseCopyable> = .none
+) throws -> (
+    shellcodePointer: UnsafeRawPointer?,
+    stackPointer: UnsafeRawPointer?,
+    thread: Mach.Thread?
+)
+```
+
+## ARM64 Instruction Sets
+
+### A64 Instruction Set
+
+Built-in support for ARM64 instructions:
+
+<CodeGroup>
+```swift Basic Instructions
+import Shellcode
+
+// Common ARM64 opcodes
+let ret: [UInt8] = [0xC0, 0x03, 0x5F, 0xD6]  // RET
+let nop: [UInt8] = [0x1F, 0x20, 0x03, 0xD5]  // NOP
+let brk: [UInt8] = [0x00, 0x00, 0x20, 0xD4]  // BRK #0
+
+// Move instructions
+let movX0_0: [UInt8] = [0x00, 0x00, 0x80, 0xD2]  // MOV X0, #0
+let movX0_42: [UInt8] = [0x40, 0x05, 0x80, 0xD2] // MOV X0, #42
+```
+
+```swift System Calls
+// ARM64 syscall sequence
+let syscallShellcode: [UInt8] = [
+    // MOV X16, #1 (syscall number for exit)
+    0x20, 0x00, 0x80, 0xD2,
+    // MOV X0, #0 (exit code)
+    0x00, 0x00, 0x80, 0xD2,
+    // SVC #0 (make syscall)
+    0x01, 0x00, 0x00, 0xD4
+]
+```
+
+```swift Function Calls
+// Call function at specific address
+let callAddress: UInt64 = 0x100000000
+
+// BLR instruction to call address in register
+let setupAndCall: [UInt8] = [
+    // MOV X0, #<lower 16 bits>
+    0x00, 0x00, 0x80, 0xD2,
+    // MOVK X0, #<next 16 bits>, LSL #16
+    0x00, 0x00, 0xA0, 0xF2,
+    // MOVK X0, #<next 16 bits>, LSL #32
+    0x00, 0x00, 0xC0, 0xF2,
+    // MOVK X0, #<upper 16 bits>, LSL #48
+    0x00, 0x00, 0xE0, 0xF2,
+    // BLR X0
+    0x00, 0x00, 0x3F, 0xD6,
+    // RET
+    0xC0, 0x03, 0x5F, 0xD6
+]
+```
+</CodeGroup>
+
+### Custom Instruction Sets
+
+Extend with your own instruction set:
+
+```swift
+import Shellcode
+
+struct MyInstructionSet: ShellcodeRepresentable {
+    var instructions: [[UInt8]]
+    
+    var shellcode: [UInt8] {
+        instructions.flatMap { $0 }
+    }
+    
+    static func nop() -> MyInstructionSet {
+        MyInstructionSet(instructions: [[0x1F, 0x20, 0x03, 0xD5]])
+    }
+    
+    static func ret() -> MyInstructionSet {
+        MyInstructionSet(instructions: [[0xC0, 0x03, 0x5F, 0xD6]])
+    }
+    
+    static func mov(_ reg: Int, _ value: UInt16) -> MyInstructionSet {
+        // Encode MOV instruction
+        let lower = UInt8(value & 0xFF)
+        let upper = UInt8((value >> 8) & 0xFF)
+        return MyInstructionSet(instructions: [[
+            lower, upper, 0x80, 0xD2
+        ]])
+    }
+}
+
+// Use custom instruction set
+let code = MyInstructionSet(instructions: [
+    MyInstructionSet.mov(0, 42).instructions[0],
+    MyInstructionSet.ret().instructions[0]
+])
+
+try targetTask.inject(shellcode: code.shellcode)
+```
+
+## Common Shellcode Patterns
+
+### Simple Function Call
+
+```swift
+// Call a function with arguments
+func generateFunctionCall(
+    address: UInt64,
+    arg0: UInt64 = 0,
+    arg1: UInt64 = 0,
+    arg2: UInt64 = 0
+) -> [UInt8] {
+    var code: [UInt8] = []
+    
+    // Load arguments into X0, X1, X2
+    // MOV X0, arg0
+    code += encodeMovImmediate(register: 0, value: arg0)
+    // MOV X1, arg1
+    code += encodeMovImmediate(register: 1, value: arg1)
+    // MOV X2, arg2
+    code += encodeMovImmediate(register: 2, value: arg2)
+    
+    // Load function address into X9
+    code += encodeMovImmediate(register: 9, value: address)
+    
+    // BLR X9 (call function)
+    code += [0x20, 0x01, 0x3F, 0xD6]
+    
+    // RET
+    code += [0xC0, 0x03, 0x5F, 0xD6]
+    
+    return code
+}
+
+func encodeMovImmediate(register: UInt8, value: UInt64) -> [UInt8] {
+    var code: [UInt8] = []
+    
+    // MOV Xn, #(value & 0xFFFF)
+    let imm0 = UInt16(value & 0xFFFF)
+    code += [UInt8(imm0 & 0xFF), UInt8((imm0 >> 8) & 0xFF), 
+             0x80 | register, 0xD2]
+    
+    // MOVK Xn, #((value >> 16) & 0xFFFF), LSL #16
+    if value >> 16 != 0 {
+        let imm1 = UInt16((value >> 16) & 0xFFFF)
+        code += [UInt8(imm1 & 0xFF), UInt8((imm1 >> 8) & 0xFF),
+                 0xA0 | register, 0xF2]
+    }
+    
+    // MOVK Xn, #((value >> 32) & 0xFFFF), LSL #32
+    if value >> 32 != 0 {
+        let imm2 = UInt16((value >> 32) & 0xFFFF)
+        code += [UInt8(imm2 & 0xFF), UInt8((imm2 >> 8) & 0xFF),
+                 0xC0 | register, 0xF2]
+    }
+    
+    // MOVK Xn, #((value >> 48) & 0xFFFF), LSL #48
+    if value >> 48 != 0 {
+        let imm3 = UInt16((value >> 48) & 0xFFFF)
+        code += [UInt8(imm3 & 0xFF), UInt8((imm3 >> 8) & 0xFF),
+                 0xE0 | register, 0xF2]
+    }
+    
+    return code
+}
+
+// Usage
+let mallocAddress: UInt64 = 0x7FF800000000  // Example address
+let shellcode = generateFunctionCall(
+    address: mallocAddress,
+    arg0: 1024  // Allocate 1024 bytes
+)
+
+try targetTask.inject(shellcode: shellcode)
+```
+
+### Thread-Local Storage Access
+
+```swift
+// Access thread-local storage
+let tlsShellcode: [UInt8] = [
+    // MRS X0, TPIDR_EL0 (get thread pointer)
+    0x40, 0xD0, 0x3B, 0xD5,
+    // LDR X1, [X0, #offset]
+    0x01, 0x00, 0x40, 0xF9,
+    // RET
+    0xC0, 0x03, 0x5F, 0xD6
+]
+```
+
+### System Call Wrapper
+
+```swift
+// Make system call from shellcode
+func generateSyscall(number: Int, args: [UInt64] = []) -> [UInt8] {
+    var code: [UInt8] = []
+    
+    // Load syscall number into X16
+    code += encodeMovImmediate(register: 16, value: UInt64(number))
+    
+    // Load arguments into X0-X7
+    for (index, arg) in args.prefix(8).enumerated() {
+        code += encodeMovImmediate(register: UInt8(index), value: arg)
+    }
+    
+    // SVC #0 (supervisor call)
+    code += [0x01, 0x00, 0x00, 0xD4]
+    
+    // RET
+    code += [0xC0, 0x03, 0x5F, 0xD6]
+    
+    return code
+}
+
+// Example: exit(0)
+let exitShellcode = generateSyscall(number: 1, args: [0])
+try targetTask.inject(shellcode: exitShellcode)
+```
+
+## Advanced Techniques
+
+### Multi-Stage Injection
+
+<Tabs>
+  <Tab title="Stage 1: Loader">
+```swift
+// Stage 1: Small loader that allocates and loads stage 2
+let stage1: [UInt8] = [
+    // Call mmap or similar to allocate larger memory
+    // Then load stage 2 from known location
+    // Jump to stage 2
+]
+
+let (loaderPtr, _, thread) = try targetTask.inject(
+    shellcode: stage1,
+    stackSize: 64 * 1024  // Small stack for loader
+)
+
+try thread!.resume()
+```
+  </Tab>
+  
+  <Tab title="Stage 2: Payload">
+```swift
+// Stage 2: Full payload with more complex logic
+let stage2: [UInt8] = [
+    // Complex shellcode
+    // Can be much larger
+    // May load additional libraries
+    // Execute main payload logic
+]
+
+// Stage 2 is loaded by stage 1
+// This separation allows bypassing size restrictions
+```
+  </Tab>
+</Tabs>
+
+### Position-Independent Code
+
+```swift
+// Generate position-independent shellcode
+func generatePIC() -> [UInt8] {
+    return [
+        // Get PC-relative address
+        // ADR X0, #offset
+        0x00, 0x00, 0x00, 0x10,
+        // Use relative addressing for data access
+        // LDR X1, [X0, #offset]
+        0x01, 0x00, 0x40, 0xF9,
+        // RET
+        0xC0, 0x03, 0x5F, 0xD6
+    ]
+}
+
+let picCode = generatePIC()
+try targetTask.inject(shellcode: picCode)
+```
+
+### Shellcode with Data
+
+```swift
+// Embed data after code
+func generateShellcodeWithData(data: [UInt8]) -> [UInt8] {
+    var code: [UInt8] = []
+    
+    // Get address of data (PC-relative)
+    // ADR X0, #<offset to data>
+    let dataOffset = 16  // After this instruction block
+    code += [0x00, 0x00, 0x00, 0x10]  // ADR X0, #...
+    
+    // Do something with data at X0
+    // LDR X1, [X0]
+    code += [0x01, 0x00, 0x40, 0xF9]
+    
+    // RET
+    code += [0xC0, 0x03, 0x5F, 0xD6]
+    
+    // Align to 8 bytes
+    while code.count % 8 != 0 {
+        code.append(0x00)
+    }
+    
+    // Append data
+    code += data
+    
+    return code
+}
+
+let myData: [UInt8] = [0x41, 0x42, 0x43, 0x44]  // "ABCD"
+let shellcode = generateShellcodeWithData(data: myData)
+try targetTask.inject(shellcode: shellcode)
+```
+
+## Integration Examples
+
+### With MachCore
+
+```swift
+import MachCore
+import Shellcode
+
+// Inject and monitor execution
+let task = try Mach.Task.forPID(targetPID)
+let (codePtr, stackPtr, thread) = try task.inject(
+    shellcode: myShellcode
+)
+
+// Set up exception port to catch crashes
+let exceptionPort = try task.getSpecialPort(.exceptionPort)
+
+// Resume and monitor
+try thread!.resume()
+
+// Wait for completion or exception
+Thread.sleep(forTimeInterval: 1.0)
+
+// Check thread state
+let threadState = try thread!.getState(
+    Mach.ThreadState<arm_thread_state64_t>.self
+)
+print("PC: 0x\(String(threadState.data.__pc, radix: 16))")
+```
+
+### With BSDCore
+
+```swift
+import BSDCore
+import MachCore
+import Shellcode
+
+// Inject code that makes BSD syscalls
+let syscallShellcode = generateSyscall(
+    number: SYS_write,
+    args: [
+        UInt64(STDOUT_FILENO),
+        0x0,  // Buffer address (needs setup)
+        14    // Length
+    ]
+)
+
+// Get task from PID
+let pid = getpid()
+let task = try Mach.Task.forPID(pid)
+
+try task.inject(shellcode: syscallShellcode)
+```
+
+## Security Considerations
+
+<Warning>
+**Required Privileges**
+- Task injection requires task_for_pid entitlement
+- Or running as root
+- Or SIP disabled for system processes
+- Target process must not be hardened
+
+**Safety Concerns**
+- Injecting into running threads is dangerous
+- Can corrupt process state
+- May cause crashes or undefined behavior
+- Always suspend threads before injection
+- Test thoroughly in isolated environments
+</Warning>
+
+### Entitlements Required
+
+```xml
+<key>com.apple.security.cs.debugger</key>
+<true/>
+<key>com.apple.security.get-task-allow</key>
+<true/>
+```
+
+## Debugging Injected Code
+
+```swift
+import MachCore
+import Shellcode
+
+// Inject with debugging support
+let debugShellcode: [UInt8] = [
+    // BRK #0 (trigger debugger)
+    0x00, 0x00, 0x20, 0xD4,
+    // Your code here
+    0xC0, 0x03, 0x5F, 0xD6  // RET
+]
+
+let task = try Mach.Task.forPID(targetPID)
+let (codePtr, _, thread) = try task.inject(
+    shellcode: debugShellcode
+)
+
+print("Code injected at: 0x\(String(UInt64(bitPattern: codePtr), radix: 16))")
+print("Attach debugger to PID \(targetPID)")
+print("Set breakpoint at: 0x\(String(UInt64(bitPattern: codePtr), radix: 16))")
+
+// Resume when debugger is attached
+try thread!.resume()
+```
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Memory Permission Errors">
+**Problem**: Cannot execute injected code
+
+**Solution**: Ensure memory is marked as executable:
+```swift
+try task.vm.protect(
+    shellcodePtr,
+    size: mach_vm_size_t(shellcode.count),
+    setMaximum: false,
+    protection: [.read, .execute]  // Not .write!
+)
+```
+  </Accordion>
+  
+  <Accordion title="Thread Crashes">
+**Problem**: Thread crashes immediately after injection
+
+**Solution**: Check stack alignment and initial state:
+```swift
+// Ensure stack is 16-byte aligned
+let stackSize = (desiredSize + 15) & ~15
+
+// Verify initial state is valid
+var state = arm_thread_state64_t()
+state.__sp = UInt64(UInt(bitPattern: stackPtr) + UInt(stackSize))
+state.__sp &= ~0xF  // 16-byte align
+```
+  </Accordion>
+  
+  <Accordion title="Injection Fails">
+**Problem**: task_for_pid or injection fails
+
+**Solution**: Check permissions and SIP:
+```swift
+do {
+    let task = try Mach.Task.forPID(pid)
+} catch MachError.failure {
+    print("Check if process is protected by SIP")
+    print("Ensure you have task_for_pid entitlement")
+    print("Try running with sudo")
+}
+```
+  </Accordion>
+</AccordionGroup>
+
+## Architecture Support
+
+<Info>
+**Currently Supported**: ARM64 (Apple Silicon, iPhone, iPad)
+
+**Not Supported**: x86_64 (Intel Macs)
+
+**Planned**: x86_64 support may be added in future versions
+</Info>
+
+```swift TaskInjection.swift:62-78
+#if arch(arm64)
+    // ARM64 injection code
+#else
+    throw POSIXError(.ENOTSUP)  // Not supported
+#endif
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MachCore Module" icon="gear" href="/modules/machcore">
+    Deep dive into task and memory management
+  </Card>
+  
+  <Card title="Advanced Examples" icon="code" href="/resources/examples">
+    See complete shellcode injection examples
+  </Card>
+</CardGroup>

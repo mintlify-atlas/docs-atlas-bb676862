@@ -1,0 +1,502 @@
+---
+title: Port API
+description: API reference for Mach port types, rights, and operations in the Kass Swift library
+---
+
+# Port API
+
+The Port API provides Swift-friendly access to Mach ports, which are the fundamental IPC primitive in the Mach kernel.
+
+## Core Types
+
+### Mach.Port
+
+A port name in a task's name space.
+
+```swift
+open class Port
+```
+
+<ParamField path="name" type="mach_port_name_t">
+  The name of the port in the owning task's name space
+</ParamField>
+
+<ParamField path="owningTask" type="Mach.Task">
+  The task that the port name is in the name space of
+</ParamField>
+
+#### Initializers
+
+```swift
+public required init(named name: mach_port_name_t, inNameSpaceOf task: Task = .current)
+```
+
+References an existing port.
+
+<ParamField path="name" type="mach_port_name_t" required>
+  The port name in the task's name space
+</ParamField>
+
+<ParamField path="task" type="Task" default=".current">
+  The task whose name space contains the port
+</ParamField>
+
+#### Properties
+
+<ResponseField name="rights" type="Mach.PortRights">
+  The port rights named by this port (throws on failure)
+  
+  ```swift
+  public var rights: Mach.PortRights { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="kernelObject" type="Mach.KernelObject">
+  The kernel object underlying the port (throws on failure)
+  
+  ```swift
+  public var kernelObject: Mach.KernelObject { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="context" type="mach_port_context_t">
+  The context of the port (throws on failure)
+  
+  ```swift
+  public var context: mach_port_context_t { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="sendRightCount" type="Int">
+  The number of send rights the receive right has (throws on failure)
+  
+  **Important:** This port name must name a receive right.
+  
+  ```swift
+  public var sendRightCount: Int { get throws }
+  ```
+</ResponseField>
+
+<ResponseField name="guarded" type="Bool">
+  Whether the port is guarded (experimental)
+  
+  **Warning:** This property being `false` doesn't mean that the port was determined to not be guarded. Instead, it means that it was not determined to be guarded. However, it being `true` means that the port was determined to be guarded.
+  
+  ```swift
+  public var guarded: Bool
+  ```
+</ResponseField>
+
+<ResponseField name="attributes" type="Mach.PortAttributeManager">
+  The attributes of the port
+  
+  ```swift
+  public var attributes: Mach.PortAttributeManager
+  ```
+</ResponseField>
+
+#### Methods
+
+```swift
+public func getContext() throws -> mach_port_context_t
+```
+
+Gets the context of the port.
+
+---
+
+```swift
+public func setContext(to context: mach_port_context_t) throws
+```
+
+Sets the context of the port.
+
+---
+
+```swift
+public func setMakeSendCount(to count: Int32) throws
+```
+
+Sets the make-send count of the port.
+
+---
+
+```swift
+public func guard(with context: mach_port_context_t, flags: Mach.PortGuardFlags = []) throws
+```
+
+Guards the port using the specified context and flags.
+
+<ParamField path="context" type="mach_port_context_t" required>
+  The guard context value
+</ParamField>
+
+<ParamField path="flags" type="Mach.PortGuardFlags" default="[]">
+  Guard flags (e.g., `.strict`, `.immovableReceive`)
+</ParamField>
+
+---
+
+```swift
+public func unguard(with context: mach_port_context_t) throws
+```
+
+Unguards the port using the specified context.
+
+---
+
+```swift
+public func extractRight<PortType: Mach.Port>(
+    using disposition: Mach.PortDisposition,
+    intoNameSpaceOf receivingTask: Mach.Task = .current
+) throws -> PortType
+```
+
+Extracts a right from the port and brings it into a given task's name space.
+
+---
+
+```swift
+public func insertRight(
+    intoNameSpaceOf task: Mach.Task,
+    using disposition: Mach.PortDisposition
+) throws
+```
+
+Inserts a right from the port into the specified task's name space.
+
+---
+
+```swift
+public func move(to set: Mach.PortSet) throws
+```
+
+Moves the port into a port set.
+
+**Warning:** If the port is already a member of any other port sets, it will be removed from them.
+
+---
+
+```swift
+public func insert(into set: Mach.PortSet) throws
+```
+
+Inserts the port into a port set.
+
+---
+
+```swift
+@available(macOS, deprecated: 12.0)
+open func destroy() throws
+```
+
+Destroys the port.
+
+**Warning:** This is an inherently unsafe API. Instead manage rights with `destruct(guard:sendRightDelta:)`, `deallocate()` or `userRefs(for:)`.
+
+## Port Rights
+
+### Mach.PortRights
+
+A right to a port.
+
+```swift
+public struct PortRights: OptionSet
+```
+
+<ParamField path="send" type="PortRights">
+  A right to send messages to a port
+</ParamField>
+
+<ParamField path="receive" type="PortRights">
+  A right to receive messages from a port
+</ParamField>
+
+<ParamField path="sendOnce" type="PortRights">
+  A right to send messages to a port once
+</ParamField>
+
+<ParamField path="portSet" type="PortRights">
+  A special right to manage a collection of ports (a port set)
+</ParamField>
+
+<ParamField path="deadName" type="PortRights">
+  A special right that is named by a dead name
+</ParamField>
+
+## Port Dispositions
+
+### Mach.PortDisposition
+
+Processing to perform on a port.
+
+```swift
+public struct PortDisposition
+```
+
+<ParamField path="moveReceive" type="PortDisposition">
+  Move the receive right
+</ParamField>
+
+<ParamField path="moveSend" type="PortDisposition">
+  Move the send right
+</ParamField>
+
+<ParamField path="moveSendOnce" type="PortDisposition">
+  Move the send-once right
+</ParamField>
+
+<ParamField path="copySend" type="PortDisposition">
+  Copy the send right
+</ParamField>
+
+<ParamField path="makeSend" type="PortDisposition">
+  Make a send right
+</ParamField>
+
+<ParamField path="makeSendOnce" type="PortDisposition">
+  Make a send-once right
+</ParamField>
+
+<ParamField path="copyReceive" type="PortDisposition">
+  Copy the receive right (Warning: A receive right can actually never be copied)
+</ParamField>
+
+## Port Sets
+
+### Mach.PortSet
+
+A port set manages a collection of ports.
+
+```swift
+public class PortSet: Mach.Port
+```
+
+#### Properties
+
+<ResponseField name="ports" type="Set<Mach.Port>">
+  The ports in the port set (throws on failure)
+  
+  ```swift
+  public var ports: Set<Mach.Port> { get throws }
+  ```
+</ResponseField>
+
+#### Methods
+
+```swift
+public func insert(_ port: Mach.Port) throws
+```
+
+Inserts a port into the port set.
+
+---
+
+```swift
+public func extract(_ port: Mach.Port) throws
+```
+
+Extracts a port from the port set.
+
+## Kernel Objects
+
+### Mach.KernelObject
+
+A kernel object underlying a port.
+
+```swift
+public struct KernelObject
+```
+
+<ResponseField name="type" type="ipc_kotype_t">
+  The type of the kernel object (e.g., `.taskControl`, `.threadControl`, `.host`)
+</ResponseField>
+
+<ResponseField name="address" type="mach_vm_address_t">
+  The address of the kernel object
+  
+  **Warning:** When using non-development kernel builds, this address may be zero.
+</ResponseField>
+
+<ResponseField name="description" type="String">
+  A string describing the kernel object
+</ResponseField>
+
+#### Initializer
+
+```swift
+public init(underlying port: Mach.Port) throws
+```
+
+Gets the underlying kernel object for a port.
+
+## Port Construction Flags
+
+### Mach.PortConstructFlags
+
+Flags to use when constructing a port.
+
+```swift
+public struct PortConstructFlags: OptionSet
+```
+
+<ParamField path="contextAsGuard" type="PortConstructFlags">
+  Use the passed context as a guard
+</ParamField>
+
+<ParamField path="queueLimit" type="PortConstructFlags">
+  Use the passed queue limit
+</ParamField>
+
+<ParamField path="tempOwner" type="PortConstructFlags">
+  Set the tempower bit on the port
+</ParamField>
+
+<ParamField path="importanceReceiver" type="PortConstructFlags">
+  Mark the port as an importance receiver
+</ParamField>
+
+<ParamField path="insertSendRight" type="PortConstructFlags">
+  Insert a send right in addition to the allocated receive right
+</ParamField>
+
+<ParamField path="strict" type="PortConstructFlags">
+  Use strict guarding (ignored if `contextAsGuard` is not passed)
+</ParamField>
+
+<ParamField path="denapReceiver" type="PortConstructFlags">
+  Mark the port as a De-Nap receiver
+</ParamField>
+
+<ParamField path="immovableReceive" type="PortConstructFlags">
+  Mark the receive right as immovable, protected by the guard (ignored if `contextAsGuard` is not passed)
+</ParamField>
+
+<ParamField path="filterMsg" type="PortConstructFlags">
+  Enable message filtering
+</ParamField>
+
+<ParamField path="trackThreadGroupBlocking" type="PortConstructFlags">
+  Enable tracking of thread group blocking
+</ParamField>
+
+<ParamField path="servicePort" type="PortConstructFlags">
+  Construct a service port (only allowed for the init system)
+</ParamField>
+
+<ParamField path="connectionPort" type="PortConstructFlags">
+  Construct a connection port
+</ParamField>
+
+<ParamField path="replyPort" type="PortConstructFlags">
+  Mark the port as a reply port
+</ParamField>
+
+<ParamField path="enforceReplyPortSemantics" type="PortConstructFlags">
+  Enforce reply port semantics
+</ParamField>
+
+<ParamField path="provisionalReplyPort" type="PortConstructFlags">
+  Mark the port as a provisional reply port
+</ParamField>
+
+<ParamField path="exceptionPort" type="PortConstructFlags">
+  Mark the port as an exception port (macOS 15+)
+</ParamField>
+
+## Port Attributes
+
+### Mach.PortAttributeManager
+
+Manages port attributes.
+
+```swift
+public struct PortAttributeManager
+```
+
+#### Methods
+
+```swift
+public func get<DataType>(
+    _ flavor: PortAttributeFlavor,
+    as type: DataType.Type = DataType.self
+) throws -> DataType where DataType: BitwiseCopyable
+```
+
+Gets the value of a port attribute.
+
+---
+
+```swift
+public func set<DataType>(
+    _ flavor: PortAttributeFlavor,
+    to value: DataType
+) throws where DataType: BitwiseCopyable
+```
+
+Sets the value of a port attribute.
+
+---
+
+```swift
+@available(macOS, introduced: 12.0.1)
+public func assert<DataType: BitwiseCopyable>(
+    _ flavor: Mach.PortAttributeFlavor,
+    is value: DataType
+) throws
+```
+
+Asserts the value of a port attribute.
+
+#### Property Accessors
+
+<ResponseField name="limits" type="mach_port_limits_t">
+  The limits of the port (throws on failure)
+</ResponseField>
+
+<ResponseField name="status" type="mach_port_status_t">
+  The status of the port (throws on failure)
+</ResponseField>
+
+<ResponseField name="requestTableCount" type="UInt32">
+  The count of requests in the port's request table (throws on failure)
+</ResponseField>
+
+<ResponseField name="info" type="mach_port_info_ext_t">
+  Information about the port (throws on failure)
+</ResponseField>
+
+## Usage Example
+
+```swift
+import Mach
+
+// Get a port from the current task
+let task = Mach.Task.current
+let ports = try task.ports
+
+for port in ports {
+    // Get port rights
+    let rights = try port.rights
+    print("Port \(port.name) has rights: \(rights)")
+    
+    // Get kernel object info
+    let kernelObj = try port.kernelObject
+    print("Kernel object type: \(kernelObj.type)")
+    
+    // Check if port is guarded
+    if port.guarded {
+        print("Port is guarded")
+    }
+}
+
+// Work with port attributes
+let port = ports.first!
+let limits = try port.attributes.limits
+print("Queue limit: \(limits.mpl_qlimit)")
+
+// Guard a port
+let guardContext: mach_port_context_t = 0x1234567890ABCDEF
+try port.guard(with: guardContext, flags: [.strict])
+defer { try? port.unguard(with: guardContext) }
+```

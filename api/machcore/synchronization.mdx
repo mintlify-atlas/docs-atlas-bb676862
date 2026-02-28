@@ -1,0 +1,423 @@
+---
+title: Synchronization API
+description: API reference for Mach synchronization primitives and eventlinks in the Kass Swift library
+---
+
+# Synchronization API
+
+The Synchronization API provides Swift-friendly access to Mach synchronization primitives, including eventlinks for low-latency thread synchronization.
+
+## Core Types
+
+### Mach.Eventlink
+
+One side of an eventlink port pair.
+
+```swift
+public class Eventlink: Mach.Port
+```
+
+Eventlinks provide a low-latency, kernel-mediated synchronization mechanism for coordinating between threads, potentially across process boundaries.
+
+## Creating Eventlinks
+
+### Static Methods
+
+```swift
+public static func create(
+    task: Mach.Task = Mach.Task.current,
+    option: mach_eventlink_create_option_t = .noCopyIn
+) throws -> (Eventlink, Eventlink)
+```
+
+Creates a new eventlink port pair.
+
+<ParamField path="task" type="Mach.Task" default="Mach.Task.current">
+  The task to create the eventlink in (kernel currently only accepts current task)
+</ParamField>
+
+<ParamField path="option" type="mach_eventlink_create_option_t" default=".noCopyIn">
+  Creation options (`.noCopyIn` is currently the only option the kernel accepts)
+</ParamField>
+
+**Returns:** A tuple containing both sides of the eventlink pair.
+
+## Association Methods
+
+```swift
+public func associate(
+    thread: Mach.Thread,
+    waitAddress: UnsafeRawPointer? = nil,
+    waitMask: UInt64 = 0,
+    signalAddress: UnsafeRawPointer? = nil,
+    signalMask: UInt64 = 0,
+    option: mach_eventlink_associate_option_t
+) throws
+```
+
+Associates a thread with an eventlink port.
+
+<ParamField path="thread" type="Mach.Thread" required>
+  The thread to associate
+</ParamField>
+
+<ParamField path="waitAddress" type="UnsafeRawPointer?" default="nil">
+  Wait address (currently unused by kernel)
+</ParamField>
+
+<ParamField path="waitMask" type="UInt64" default="0">
+  Wait mask (currently unused by kernel)
+</ParamField>
+
+<ParamField path="signalAddress" type="UnsafeRawPointer?" default="nil">
+  Signal address (currently unused by kernel)
+</ParamField>
+
+<ParamField path="signalMask" type="UInt64" default="0">
+  Signal mask (currently unused by kernel)
+</ParamField>
+
+<ParamField path="option" type="mach_eventlink_associate_option_t" required>
+  Association options
+</ParamField>
+
+**Note:** The addresses and masks are currently unused by the kernel, but the parameters are included for completeness.
+
+---
+
+```swift
+public func disassociate(
+    option: mach_eventlink_disassociate_option_t = .none
+) throws
+```
+
+Disassociates a thread from an eventlink port.
+
+<ParamField path="option" type="mach_eventlink_disassociate_option_t" default=".none">
+  Disassociation options
+</ParamField>
+
+## Signaling and Waiting
+
+### Methods
+
+```swift
+public func signal(_ signalCount: UInt64 = 0) throws
+```
+
+Signals the other side of the eventlink.
+
+<ParamField path="signalCount" type="UInt64" default="0">
+  Signal count (currently unused by kernel)
+</ParamField>
+
+**Note:** The `signalCount` parameter is currently unused by the kernel, but the parameter is included for completeness.
+
+---
+
+```swift
+public func waitUntil(
+    count: consuming UInt64,
+    option: mach_eventlink_signal_wait_option_t,
+    clockID: kern_clock_id_t = .machAbsoluteTime,
+    deadline: UInt64
+) throws
+```
+
+Waits until the signal count exceeds a certain value (or the deadline passes).
+
+<ParamField path="count" type="consuming UInt64" required>
+  The count to wait for
+</ParamField>
+
+<ParamField path="option" type="mach_eventlink_signal_wait_option_t" required>
+  Wait options
+</ParamField>
+
+<ParamField path="clockID" type="kern_clock_id_t" default=".machAbsoluteTime">
+  The clock to use for the deadline
+</ParamField>
+
+<ParamField path="deadline" type="UInt64" required>
+  The deadline (absolute time)
+</ParamField>
+
+---
+
+```swift
+public func signalWaitUntil(
+    count: consuming UInt64,
+    signalCount: UInt64 = 0,
+    option: mach_eventlink_signal_wait_option_t,
+    clockID: kern_clock_id_t = .machAbsoluteTime,
+    deadline: UInt64
+) throws
+```
+
+Signals the other side of the eventlink, and waits until the signal count exceeds a certain value (or the deadline passes).
+
+<ParamField path="count" type="consuming UInt64" required>
+  The count to wait for
+</ParamField>
+
+<ParamField path="signalCount" type="UInt64" default="0">
+  Signal count to send (currently unused by kernel)
+</ParamField>
+
+<ParamField path="option" type="mach_eventlink_signal_wait_option_t" required>
+  Wait options
+</ParamField>
+
+<ParamField path="clockID" type="kern_clock_id_t" default=".machAbsoluteTime">
+  The clock to use for the deadline
+</ParamField>
+
+<ParamField path="deadline" type="UInt64" required>
+  The deadline (absolute time)
+</ParamField>
+
+**Note:** The `signalCount` parameter is currently unused by the kernel, but the parameter is included for completeness.
+
+## Lifecycle
+
+```swift
+public override func destroy() throws
+```
+
+Destroys the eventlink port.
+
+## Option Types
+
+### mach_eventlink_create_option_t
+
+```swift
+extension mach_eventlink_create_option_t {
+    public static let none: mach_eventlink_create_option_t
+    public static let noCopyIn: mach_eventlink_create_option_t
+    public static let withCopyIn: mach_eventlink_create_option_t
+}
+```
+
+<ParamField path="none" type="mach_eventlink_create_option_t">
+  No special options
+</ParamField>
+
+<ParamField path="noCopyIn" type="mach_eventlink_create_option_t">
+  No copy-in (currently the only option kernel accepts)
+</ParamField>
+
+<ParamField path="withCopyIn" type="mach_eventlink_create_option_t">
+  With copy-in
+</ParamField>
+
+### mach_eventlink_associate_option_t
+
+```swift
+extension mach_eventlink_associate_option_t {
+    public static let none: mach_eventlink_associate_option_t
+    public static let associateOnWait: mach_eventlink_associate_option_t
+}
+```
+
+<ParamField path="none" type="mach_eventlink_associate_option_t">
+  No special options
+</ParamField>
+
+<ParamField path="associateOnWait" type="mach_eventlink_associate_option_t">
+  Associate on wait
+</ParamField>
+
+### mach_eventlink_disassociate_option_t
+
+```swift
+extension mach_eventlink_disassociate_option_t {
+    public static let none: mach_eventlink_disassociate_option_t
+}
+```
+
+<ParamField path="none" type="mach_eventlink_disassociate_option_t">
+  No special options
+</ParamField>
+
+### mach_eventlink_signal_wait_option_t
+
+```swift
+extension mach_eventlink_signal_wait_option_t {
+    public static let none: mach_eventlink_signal_wait_option_t
+    public static let noWait: mach_eventlink_signal_wait_option_t
+}
+```
+
+<ParamField path="none" type="mach_eventlink_signal_wait_option_t">
+  No special options (will wait)
+</ParamField>
+
+<ParamField path="noWait" type="mach_eventlink_signal_wait_option_t">
+  Don't wait
+</ParamField>
+
+### kern_clock_id_t
+
+```swift
+extension kern_clock_id_t {
+    public static let machAbsoluteTime: kern_clock_id_t
+}
+```
+
+<ParamField path="machAbsoluteTime" type="kern_clock_id_t">
+  Mach absolute time clock
+</ParamField>
+
+## Usage Example
+
+```swift
+import Mach
+
+// Create an eventlink pair
+let (eventlink1, eventlink2) = try Mach.Eventlink.create()
+
+defer {
+    try? eventlink1.destroy()
+    try? eventlink2.destroy()
+}
+
+// Associate threads with the eventlinks
+let thread1 = Mach.Thread.current
+try eventlink1.associate(
+    thread: thread1,
+    option: .none
+)
+
+// In another thread...
+let thread2 = /* get another thread */
+try eventlink2.associate(
+    thread: thread2,
+    option: .none
+)
+
+// Thread 1: Wait for signal
+Task {
+    do {
+        let deadline = mach_absolute_time() + 1_000_000_000  // 1 second
+        try eventlink1.waitUntil(
+            count: 1,
+            option: .none,
+            clockID: .machAbsoluteTime,
+            deadline: deadline
+        )
+        print("Received signal!")
+    } catch {
+        print("Wait failed or timed out: \(error)")
+    }
+}
+
+// Thread 2: Send signal
+Task {
+    try await Task.sleep(nanoseconds: 100_000_000)  // Wait 100ms
+    try eventlink2.signal()
+    print("Sent signal!")
+}
+
+// Disassociate when done
+defer {
+    try? eventlink1.disassociate()
+    try? eventlink2.disassociate()
+}
+```
+
+## Advanced Usage
+
+### Bidirectional Synchronization
+
+```swift
+import Mach
+
+let (linkA, linkB) = try Mach.Eventlink.create()
+
+// Thread A
+Task {
+    try linkA.associate(thread: Mach.Thread.current, option: .none)
+    
+    // Signal and wait for response
+    let deadline = mach_absolute_time() + 1_000_000_000
+    try linkA.signalWaitUntil(
+        count: 1,
+        signalCount: 0,
+        option: .none,
+        deadline: deadline
+    )
+    print("Thread A: Received acknowledgment")
+    
+    try linkA.disassociate()
+}
+
+// Thread B
+Task {
+    try linkB.associate(thread: Mach.Thread.current, option: .none)
+    
+    // Wait for signal then respond
+    let deadline = mach_absolute_time() + 1_000_000_000
+    try linkB.waitUntil(
+        count: 1,
+        option: .none,
+        deadline: deadline
+    )
+    print("Thread B: Received signal")
+    
+    // Send acknowledgment
+    try linkB.signal()
+    
+    try linkB.disassociate()
+}
+```
+
+### Non-blocking Signal
+
+```swift
+let (producer, consumer) = try Mach.Eventlink.create()
+
+// Producer: non-blocking signal
+try producer.associate(thread: Mach.Thread.current, option: .none)
+
+// Signal without waiting
+try producer.signal()
+print("Signal sent, continuing without blocking")
+
+// Consumer: wait with timeout
+try consumer.associate(thread: Mach.Thread.current, option: .none)
+let deadline = mach_absolute_time() + 500_000_000  // 500ms timeout
+
+do {
+    try consumer.waitUntil(
+        count: 1,
+        option: .none,
+        deadline: deadline
+    )
+    print("Received signal within timeout")
+} catch {
+    print("Timeout expired")
+}
+```
+
+## Performance Considerations
+
+Eventlinks are designed for extremely low-latency synchronization:
+
+- **System calls**: Eventlink operations are system calls (traps), not MIG messages
+- **Use case**: Best for frequent, low-latency synchronization between threads
+- **Cross-process**: Eventlink ports can be sent to other processes for IPC synchronization
+- **Lightweight**: Much faster than traditional Mach IPC for simple signaling
+
+## Comparison with Other Primitives
+
+<Expandable title="Eventlinks vs. Semaphores">
+Eventlinks are lower-latency than Mach semaphores and are better suited for real-time synchronization scenarios.
+</Expandable>
+
+<Expandable title="Eventlinks vs. Mach Messages">
+For simple signaling, eventlinks are much faster than sending Mach messages, but they don't carry data.
+</Expandable>
+
+<Expandable title="Eventlinks vs. Darwin Threads">
+Eventlinks can synchronize across process boundaries, unlike pthread primitives.
+</Expandable>

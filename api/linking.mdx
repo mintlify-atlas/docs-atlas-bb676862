@@ -1,0 +1,268 @@
+---
+title: 'Linking Module'
+description: 'Dynamic library and symbol linking for macOS and iOS'
+---
+
+The Linking module provides a Swift-friendly API for dynamically loading libraries, frameworks, and symbols at runtime.
+
+## Classes
+
+### Handle
+
+A handle represents a loaded library or symbol.
+
+<ParamField path="name" type="String">
+  The name of the handle
+</ParamField>
+
+<ParamField path="rawHandle" type="UnsafeMutableRawPointer">
+  The raw handle pointer
+</ParamField>
+
+<ParamField path="type" type="HandleType">
+  The type of handle (`.library` or `.symbol`)
+</ParamField>
+
+#### HandleType
+
+```swift
+public enum HandleType {
+    case library
+    case symbol
+}
+```
+
+---
+
+### Library
+
+A library handle for loading dynamic libraries.
+
+#### Initialization
+
+```swift
+public init?(path: String)
+```
+
+Creates a new library handle from the given path. Returns `nil` if the library cannot be loaded.
+
+<ParamField path="path" type="String">
+  The path to the library file
+</ParamField>
+
+<ResponseField name="Returns" type="Library?">
+  A library handle, or `nil` if loading fails
+</ResponseField>
+
+#### Methods
+
+<ParamField path="link()" type="() -> Void">
+  Links the library. This is technically a no-op since the library is linked during initialization, but provided as a convenience method.
+</ParamField>
+
+<ParamField path="get(symbol:)" type="(String) -> Symbol?">
+  Gets a symbol handle from the library by name
+  
+  **Parameters:**
+  - `symbol`: The name of the symbol
+  
+  **Returns:** The symbol handle, or `nil` if not found
+</ParamField>
+
+<ParamField path="get(symbol:atExpectedAddress:otherSymbol:otherSymbolExpectedAddress:)" type="(String, vm_address_t, String, vm_address_t) -> Symbol?">
+  Gets a symbol at a specific address using offset calculation
+  
+  **Parameters:**
+  - `symbol`: The name of the symbol
+  - `expectedAddress`: The expected address of the symbol
+  - `otherSymbol`: Name of an exported symbol to use as reference
+  - `otherSymbolExpectedAddress`: Expected address of the reference symbol
+  
+  **Returns:** The symbol handle, or `nil` if not found
+  
+  <Warning>
+    Use a binary analysis tool to find expected addresses. The `otherSymbol` must be an exported symbol in the same library.
+  </Warning>
+</ParamField>
+
+<ParamField path="get(objCClass:)" type="(String) -> NSObjectProtocol.Type?">
+  Gets an Objective-C class from the library
+  
+  **Parameters:**
+  - `className`: The name of the class
+  
+  **Returns:** The class, or `nil` if not found
+</ParamField>
+
+<ParamField path="get(objCClass:castTo:)" type="<T>(String, T.Type) -> T?">
+  Gets an Objective-C class and casts it to a protocol type
+  
+  **Parameters:**
+  - `className`: The name of the class
+  - `castTo`: The protocol type to cast to
+  
+  **Returns:** The class cast to the specified type, or `nil` if not found
+</ParamField>
+
+#### Example
+
+```swift
+import Linking
+
+// Load a library
+guard let lib = Library(path: "/usr/lib/libSystem.B.dylib") else {
+    print("Failed to load library")
+    return
+}
+
+// Get a symbol
+if let symbol = lib.get(symbol: "printf") {
+    let printfFunc = symbol.cast(to: (@convention(c) (UnsafePointer<CChar>) -> Int32).self)
+    printfFunc("Hello from Kass!\n")
+}
+
+// Get an Objective-C class
+if let nsStringClass = lib.get(objCClass: "NSString") {
+    print("Found NSString class")
+}
+```
+
+---
+
+### Symbol
+
+A symbol handle representing a loaded symbol from a library.
+
+#### Methods
+
+<ParamField path="cast(to:)" type="<T>(T.Type) -> T">
+  Casts the symbol to a specific type
+  
+  **Parameters:**
+  - `to`: The type to cast to
+  
+  **Returns:** The symbol cast to the specified type
+  
+  <Note>
+    This is equivalent to `unsafeBitCast(self.rawHandle, to: T.self)`
+  </Note>
+</ParamField>
+
+<ParamField path="load(as:)" type="<T>(T.Type) -> T">
+  Loads the symbol's value as a specific type
+  
+  **Parameters:**
+  - `as`: The type to load as
+  
+  **Returns:** The value at the symbol's address
+  
+  <Note>
+    This is equivalent to `self.rawHandle.load(as: T.self)`
+  </Note>
+</ParamField>
+
+#### Example
+
+```swift
+import Linking
+
+let lib = Library(path: "/usr/lib/libSystem.B.dylib")!
+let symbol = lib.get(symbol: "environ")!
+
+// Load as a pointer to environment variables
+let environ = symbol.load(as: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.self)
+```
+
+---
+
+### Framework
+
+A specialized library handle for loading system frameworks.
+
+#### Initialization
+
+```swift
+public init?(_ name: String, isPrivate: Bool = false)
+```
+
+Creates a framework handle from the system frameworks directory.
+
+<ParamField path="name" type="String">
+  The name of the framework (without `.framework` extension)
+</ParamField>
+
+<ParamField path="isPrivate" type="Bool" default="false">
+  Whether to load from `/System/Library/PrivateFrameworks` instead of `/System/Library/Frameworks`
+</ParamField>
+
+```swift
+public init?(_ name: String, inPath path: URL)
+```
+
+Creates a framework handle from a custom directory.
+
+<ParamField path="name" type="String">
+  The name of the framework
+</ParamField>
+
+<ParamField path="path" type="URL">
+  The directory containing the framework
+</ParamField>
+
+#### Methods
+
+<ParamField path="get(subFramework:)" type="(String) -> Framework?">
+  Gets a sub-framework handle from this framework
+  
+  **Parameters:**
+  - `subFramework`: The name of the sub-framework
+  
+  **Returns:** A handle to the sub-framework, or `nil` if not found
+</ParamField>
+
+#### Example
+
+```swift
+import Linking
+
+// Load a public framework
+if let foundation = Framework("Foundation") {
+    foundation.link()
+    print("Foundation loaded")
+}
+
+// Load a private framework
+if let privateFramework = Framework("SomePrivateFramework", isPrivate: true) {
+    privateFramework.link()
+}
+
+// Get a sub-framework
+if let parent = Framework("IOKit"),
+   let subFramework = parent.get(subFramework: "IOKitLib") {
+    print("Sub-framework loaded")
+}
+```
+
+---
+
+## Global Variables
+
+<ParamField path="libSystem" type="Library">
+  A handle to the system library (`/usr/lib/libSystem.B.dylib`)
+  
+  ```swift
+  public var libSystem: Library
+  ```
+</ParamField>
+
+#### Example
+
+```swift
+import Linking
+
+// Access the system library directly
+if let malloc = libSystem.get(symbol: "malloc") {
+    let mallocFunc = malloc.cast(to: (@convention(c) (Int) -> UnsafeMutableRawPointer?).self)
+    let ptr = mallocFunc(1024)
+}
+```

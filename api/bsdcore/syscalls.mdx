@@ -1,0 +1,294 @@
+---
+title: "Syscall API"
+description: "Low-level BSD system call interface in BSDCore"
+---
+
+## Overview
+
+The BSDCore Syscall API provides a low-level interface for making BSD system calls directly. This is useful for accessing kernel functionality that may not have higher-level wrappers.
+
+## Making System Calls
+
+### syscall Method
+
+```swift
+public static func syscall(
+    _ number: Int32,
+    _ args: BSDSyscallArgument...
+) throws -> Int32
+```
+
+<ParamField path="number" type="Int32" required>
+  The system call number
+</ParamField>
+
+<ParamField path="args" type="BSDSyscallArgument...">
+  Variable number of arguments (up to 8)
+</ParamField>
+
+Makes a system call with the specified number and arguments. Returns the system call result.
+
+### syscall (No Arguments)
+
+```swift
+public static func syscall(_ number: Int32) throws -> Int32
+```
+
+<ParamField path="number" type="Int32" required>
+  The system call number
+</ParamField>
+
+Makes a system call with no arguments.
+
+## BSDSyscallArgument Protocol
+
+Defines types that can be passed as system call arguments.
+
+```swift
+public protocol BSDSyscallArgument {
+    func toSyscallArg() -> syscall_arg_t
+}
+```
+
+### Conforming Types
+
+The following types conform to `BSDSyscallArgument` out of the box:
+
+#### Integer Types
+
+<ResponseField name="Int" type="BSDSyscallArgument">
+  Signed integer
+</ResponseField>
+
+<ResponseField name="UInt" type="BSDSyscallArgument">
+  Unsigned integer
+</ResponseField>
+
+<ResponseField name="Int8" type="BSDSyscallArgument">
+  8-bit signed integer
+</ResponseField>
+
+<ResponseField name="UInt8" type="BSDSyscallArgument">
+  8-bit unsigned integer
+</ResponseField>
+
+<ResponseField name="Int16" type="BSDSyscallArgument">
+  16-bit signed integer
+</ResponseField>
+
+<ResponseField name="UInt16" type="BSDSyscallArgument">
+  16-bit unsigned integer
+</ResponseField>
+
+<ResponseField name="Int32" type="BSDSyscallArgument">
+  32-bit signed integer
+</ResponseField>
+
+<ResponseField name="UInt32" type="BSDSyscallArgument">
+  32-bit unsigned integer
+</ResponseField>
+
+<ResponseField name="Int64" type="BSDSyscallArgument">
+  64-bit signed integer
+</ResponseField>
+
+<ResponseField name="UInt64" type="BSDSyscallArgument">
+  64-bit unsigned integer
+</ResponseField>
+
+<ResponseField name="Int128" type="BSDSyscallArgument">
+  128-bit signed integer (macOS 15.0+, iOS 18.0+)
+</ResponseField>
+
+<ResponseField name="UInt128" type="BSDSyscallArgument">
+  128-bit unsigned integer (macOS 15.0+, iOS 18.0+)
+</ResponseField>
+
+#### Pointer Types
+
+<ResponseField name="UnsafePointer" type="BSDSyscallArgument">
+  Unsafe pointer to memory
+</ResponseField>
+
+<ResponseField name="UnsafeMutablePointer" type="BSDSyscallArgument">
+  Unsafe mutable pointer to memory
+</ResponseField>
+
+<ResponseField name="UnsafeRawPointer" type="BSDSyscallArgument">
+  Unsafe raw pointer to memory
+</ResponseField>
+
+<ResponseField name="UnsafeMutableRawPointer" type="BSDSyscallArgument">
+  Unsafe mutable raw pointer to memory
+</ResponseField>
+
+#### Other Types
+
+<ResponseField name="String" type="BSDSyscallArgument">
+  String (converted to C string)
+</ResponseField>
+
+<ResponseField name="Bool" type="BSDSyscallArgument">
+  Boolean (converted to 1 or 0)
+</ResponseField>
+
+<ResponseField name="Data" type="BSDSyscallArgument">
+  Data buffer
+</ResponseField>
+
+<ResponseField name="Array" type="BSDSyscallArgument">
+  Array of elements
+</ResponseField>
+
+## BSD Call Helper
+
+The `BSD.call` method wraps system calls and converts errors to Swift exceptions.
+
+```swift
+public static func call<ReturnType: BinaryInteger>(
+    _ call: @autoclosure () throws -> ReturnType,
+    returnsErrno: Bool = false
+) throws -> ReturnType
+```
+
+<ParamField path="call" type="@autoclosure () throws -> ReturnType" required>
+  The system call to execute
+</ParamField>
+
+<ParamField path="returnsErrno" type="Bool">
+  Whether the call returns errno directly (vs. returning -1 on error). Default is false.
+</ParamField>
+
+Executes a function that returns a POSIX error code and throws an error if it fails.
+
+## Example Usage
+
+<CodeGroup>
+
+```swift Basic Syscall
+import BSDCore
+
+// Make a getpid syscall (syscall number 20)
+let pid = try BSD.syscall(20)
+print("PID: \(pid)")
+```
+
+```swift Syscall with Arguments
+import BSDCore
+
+// Example: Making a syscall with integer arguments
+let result = try BSD.syscall(
+    123,  // syscall number
+    42,   // first argument
+    100   // second argument
+)
+```
+
+```swift Syscall with String
+import BSDCore
+
+// Pass a string argument
+let path = "/tmp/test"
+let result = try BSD.syscall(
+    syscallNumber,
+    path
+)
+```
+
+```swift Syscall with Pointer
+import BSDCore
+
+var buffer = Data(count: 1024)
+let result = try buffer.withUnsafeMutableBytes { bufferPointer in
+    try BSD.syscall(
+        syscallNumber,
+        bufferPointer.baseAddress!
+    )
+}
+```
+
+```swift Using BSD.call
+import BSDCore
+import Darwin
+
+// Wrap a Darwin call with error handling
+let fd = try BSD.call(open("/tmp/test", O_RDONLY))
+defer { close(fd) }
+
+print("Opened file descriptor: \(fd)")
+```
+
+```swift Custom Syscall Argument
+import BSDCore
+
+// Define a custom type that can be passed to syscalls
+struct MyStruct {
+    var value: Int32
+}
+
+extension MyStruct: BSD.BSDSyscallArgument {
+    func toSyscallArg() -> syscall_arg_t {
+        return syscall_arg_t(value)
+    }
+}
+
+let myArg = MyStruct(value: 42)
+let result = try BSD.syscall(syscallNumber, myArg)
+```
+
+```swift Multiple Arguments
+import BSDCore
+
+// System calls can take up to 8 arguments
+let result = try BSD.syscall(
+    syscallNumber,
+    arg1,
+    arg2,
+    arg3,
+    arg4,
+    arg5,
+    arg6,
+    arg7,
+    arg8
+)
+```
+
+</CodeGroup>
+
+## Error Handling
+
+All syscall methods throw `POSIXError` when a system call fails:
+
+```swift
+import BSDCore
+
+do {
+    let result = try BSD.syscall(invalidSyscallNumber)
+} catch let error as POSIXError {
+    print("Syscall failed: \(error)")
+    print("Error code: \(error.code.rawValue)")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+## System Call Limits
+
+- Maximum of 8 arguments per system call
+- Arguments are converted to `syscall_arg_t` internally
+- String arguments are converted to C strings and memory is allocated
+- Array and Data arguments are copied to allocated memory
+
+## Memory Management
+
+<Warning>
+  When passing String, Data, or Array arguments, the system allocates memory that is passed to the kernel. Be aware of memory implications when making frequent syscalls with these types.
+</Warning>
+
+## Notes
+
+- This is a low-level API - use higher-level wrappers when available
+- System call numbers are platform-specific
+- Always check the system call documentation for correct usage
+- The `returnsErrno` parameter is primarily used for calls like `posix_spawn` that return errno directly
+- Invalid system call numbers will result in errors

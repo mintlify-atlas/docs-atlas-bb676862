@@ -1,0 +1,520 @@
+---
+title: "Process API"
+description: "Process information, management, and control operations in BSDCore"
+---
+
+## Overview
+
+The BSDCore Process API provides comprehensive access to process information through the `proc_info` family of system calls. You can query process details, list PIDs, get file descriptor information, and more.
+
+## Proc Structure
+
+Represents a process with a specific PID.
+
+```swift
+public struct Proc
+```
+
+### Initialization
+
+```swift
+public init(pid: pid_t)
+```
+
+<ParamField path="pid" type="pid_t" required>
+  The process ID
+</ParamField>
+
+### Properties
+
+<ResponseField name="pid" type="pid_t">
+  The PID of the process
+</ResponseField>
+
+## Process Information Methods
+
+### Generic Info Methods
+
+```swift
+public func info(
+    flavor: BSD.ProcPIDInfoFlavor,
+    arg: UInt64 = 0,
+    buffer: inout Data
+) throws -> Int32
+```
+
+<ParamField path="flavor" type="BSD.ProcPIDInfoFlavor" required>
+  The type of information to retrieve
+</ParamField>
+
+<ParamField path="arg" type="UInt64">
+  Additional argument for some flavors (default: 0)
+</ParamField>
+
+<ParamField path="buffer" type="inout Data" required>
+  Buffer to store the result
+</ParamField>
+
+```swift
+public func info<DataType>(
+    flavor: BSD.ProcPIDInfoFlavor,
+    arg: UInt64 = 0,
+    returnAs type: DataType.Type = DataType.self
+) throws -> DataType
+```
+
+<ParamField path="flavor" type="BSD.ProcPIDInfoFlavor" required>
+  The type of information to retrieve
+</ParamField>
+
+<ParamField path="arg" type="UInt64">
+  Additional argument for some flavors (default: 0)
+</ParamField>
+
+<ParamField path="type" type="DataType.Type">
+  The type to cast the result to
+</ParamField>
+
+## Process Properties
+
+### File Descriptors
+
+```swift
+public var fileDescriptors: [proc_fdinfo] { get throws }
+```
+
+<ResponseField name="fileDescriptors" type="[proc_fdinfo]">
+  Information about all file descriptors for the process
+</ResponseField>
+
+### Task Information
+
+```swift
+public var taskAllInfo: proc_taskallinfo { get throws }
+```
+
+<ResponseField name="taskAllInfo" type="proc_taskallinfo">
+  All information about the task for the process
+</ResponseField>
+
+```swift
+public var taskInfo: proc_taskinfo { get throws }
+```
+
+<ResponseField name="taskInfo" type="proc_taskinfo">
+  Task information for the process
+</ResponseField>
+
+### BSD Information
+
+```swift
+public var bsdInfo: proc_bsdinfo { get throws }
+```
+
+<ResponseField name="bsdInfo" type="proc_bsdinfo">
+  BSD information about the process
+</ResponseField>
+
+```swift
+public var shortBSDInfo: proc_bsdshortinfo { get throws }
+```
+
+<ResponseField name="shortBSDInfo" type="proc_bsdshortinfo">
+  Short BSD information about the process
+</ResponseField>
+
+```swift
+public var bsdInfoWithUniqueIdentifier: proc_bsdinfowithuniqid { get throws }
+```
+
+<ResponseField name="bsdInfoWithUniqueIdentifier" type="proc_bsdinfowithuniqid">
+  BSD information along with unique identifier information
+</ResponseField>
+
+### Thread Information
+
+```swift
+public var tsdAddresses: [UnsafeRawPointer] { get throws }
+```
+
+<ResponseField name="tsdAddresses" type="[UnsafeRawPointer]">
+  The list of thread-specific data (TSD) addresses for all threads in the process
+</ResponseField>
+
+```swift
+public func threadInfo(tsdAddress: UnsafeRawPointer) throws -> [UnsafeRawPointer]
+```
+
+<ParamField path="tsdAddress" type="UnsafeRawPointer" required>
+  Pointer to the thread-specific data for the thread
+</ParamField>
+
+```swift
+public func threadInfo(threadID: UInt64) throws -> proc_threadinfo
+```
+
+<ParamField path="threadID" type="UInt64" required>
+  The thread ID
+</ParamField>
+
+```swift
+public var threadIDs: [UInt64] { get throws }
+```
+
+<ResponseField name="threadIDs" type="[UInt64]">
+  The list of thread IDs for the process
+</ResponseField>
+
+```swift
+public var threadSchedulingInfo: proc_threadschedinfo { get throws }
+```
+
+<ResponseField name="threadSchedulingInfo" type="proc_threadschedinfo">
+  Scheduling information for threads in the process
+</ResponseField>
+
+```swift
+public var threadCounts: proc_threadcounts { get throws }
+```
+
+<ResponseField name="threadCounts" type="proc_threadcounts">
+  Thread counts for the process
+</ResponseField>
+
+### Path and Vnode Information
+
+```swift
+public var path: String? { get throws }
+```
+
+<ResponseField name="path" type="String?">
+  The path of the executable for the process
+</ResponseField>
+
+```swift
+public var vnodePathInfo: proc_vnodepathinfo { get throws }
+```
+
+<ResponseField name="vnodePathInfo" type="proc_vnodepathinfo">
+  Information about the vnode for the process
+</ResponseField>
+
+```swift
+public func threadPathInfo(tsdAddress: UnsafeRawPointer) throws -> proc_threadwithpathinfo
+```
+
+<ParamField path="tsdAddress" type="UnsafeRawPointer" required>
+  The thread-specific data address
+</ParamField>
+
+### Memory Region Information
+
+```swift
+public func regionInfo(address: UnsafeRawPointer) throws -> proc_regioninfo
+```
+
+<ParamField path="address" type="UnsafeRawPointer" required>
+  The address of the region
+</ParamField>
+
+```swift
+public func regionPathInfo(address: UnsafeRawPointer) throws -> proc_regionwithpathinfo
+```
+
+<ParamField path="address" type="UnsafeRawPointer" required>
+  The address of the region
+</ParamField>
+
+```swift
+public func regionPath(address: UnsafeRawPointer) throws -> proc_regionpath
+```
+
+<ParamField path="address" type="UnsafeRawPointer" required>
+  The address of the region
+</ParamField>
+
+### Work Queue Information
+
+```swift
+public var workQueueInfo: proc_workqueueinfo { get throws }
+```
+
+<ResponseField name="workQueueInfo" type="proc_workqueueinfo">
+  Information about the work queues for the process
+</ResponseField>
+
+### File Ports
+
+```swift
+public var fileports: [proc_fileportinfo] { get throws }
+```
+
+<ResponseField name="fileports" type="[proc_fileportinfo]">
+  Information about all file ports for the process
+</ResponseField>
+
+### Process Identification
+
+```swift
+public var uniqueIdentifier: proc_uniqidentifierinfo { get throws }
+```
+
+<ResponseField name="uniqueIdentifier" type="proc_uniqidentifierinfo">
+  Unique identifier information for the process
+</ResponseField>
+
+### Architecture Information
+
+```swift
+public var archInfo: proc_archinfo { get throws }
+```
+
+<ResponseField name="archInfo" type="proc_archinfo">
+  Architecture information for the process
+</ResponseField>
+
+```swift
+public var platform: UInt32 { get throws }
+```
+
+<ResponseField name="platform" type="UInt32">
+  The platform for the process
+</ResponseField>
+
+### Coalition Information
+
+```swift
+public var coalitionInfo: proc_pidcoalitioninfo { get throws }
+```
+
+<ResponseField name="coalitionInfo" type="proc_pidcoalitioninfo">
+  Coalition information for the process
+</ResponseField>
+
+### Exit Information
+
+```swift
+public var noteExit: UInt32 { get throws }
+```
+
+<ResponseField name="noteExit" type="UInt32">
+  Exit information for the process
+</ResponseField>
+
+```swift
+public var exitReason: proc_exitreasoninfo { get throws }
+```
+
+<ResponseField name="exitReason" type="proc_exitreasoninfo">
+  Exit reason information for the process
+</ResponseField>
+
+```swift
+public var exitReasonBasic: proc_exitreasonbasicinfo { get throws }
+```
+
+<ResponseField name="exitReasonBasic" type="proc_exitreasonbasicinfo">
+  Basic exit reason information for the process
+</ResponseField>
+
+### Advanced Properties
+
+```swift
+public var dynamicQueues: [kqueue_id_t] { get throws }
+```
+
+<ResponseField name="dynamicQueues" type="[kqueue_id_t]">
+  The list of dynamic queues for the process
+</ResponseField>
+
+```swift
+public var vmRealtimeFaultRecords: [vm_rtfault_record_t] { get throws }
+```
+
+<ResponseField name="vmRealtimeFaultRecords" type="[vm_rtfault_record_t]">
+  Fault records for threads in the process that use real-time scheduling
+</ResponseField>
+
+```swift
+public var ipcTableInfo: proc_ipctableinfo { get throws }
+```
+
+<ResponseField name="ipcTableInfo" type="proc_ipctableinfo">
+  Information about the IPC table for the process
+</ResponseField>
+
+## Listing PIDs
+
+### ProcPIDListType
+
+Defines the type of PID list to retrieve.
+
+```swift
+public struct ProcPIDListType
+```
+
+#### Static Properties
+
+<ResponseField name="all" type="ProcPIDListType">
+  All PIDs in the system
+</ResponseField>
+
+<ResponseField name="processGroupOnly" type="ProcPIDListType">
+  PIDs in a specific process group
+</ResponseField>
+
+<ResponseField name="ttyOnly" type="ProcPIDListType">
+  PIDs associated with a specific TTY
+</ResponseField>
+
+<ResponseField name="uidOnly" type="ProcPIDListType">
+  PIDs for a specific user ID
+</ResponseField>
+
+<ResponseField name="realUIDOnly" type="ProcPIDListType">
+  PIDs for a specific real user ID
+</ResponseField>
+
+<ResponseField name="parentPIDOnly" type="ProcPIDListType">
+  PIDs with a specific parent PID
+</ResponseField>
+
+<ResponseField name="kernelDebugOnly" type="ProcPIDListType">
+  PIDs that have kernel debug enabled
+</ResponseField>
+
+### listPIDs Method
+
+```swift
+public static func listPIDs(
+    _ list: BSD.ProcPIDListDescription
+) throws -> [pid_t]
+```
+
+<ParamField path="list" type="BSD.ProcPIDListDescription" required>
+  Description of the list type and optional filter info
+</ParamField>
+
+## Example Usage
+
+<CodeGroup>
+
+```swift Get Process Info
+import BSDCore
+
+let proc = BSD.Proc(pid: 1234)
+
+// Get the executable path
+if let path = try proc.path {
+    print("Process path: \(path)")
+}
+
+// Get BSD info
+let bsdInfo = try proc.bsdInfo
+print("Process name: \(String(cString: &bsdInfo.pbi_name))")
+
+// Get task info
+let taskInfo = try proc.taskInfo
+print("Virtual size: \(taskInfo.pti_virtual_size)")
+print("Resident size: \(taskInfo.pti_resident_size)")
+```
+
+```swift List All PIDs
+import BSDCore
+
+// List all PIDs in the system
+let allPIDs = try BSD.Proc.listPIDs(
+    BSD.ProcPIDListDescription(type: .all)
+)
+
+print("Total processes: \(allPIDs.count)")
+for pid in allPIDs {
+    print("PID: \(pid)")
+}
+```
+
+```swift List PIDs by User
+import BSDCore
+
+// List PIDs for a specific user (UID 501)
+let userPIDs = try BSD.Proc.listPIDs(
+    BSD.ProcPIDListDescription(
+        type: .uidOnly,
+        info: 501
+    )
+)
+
+print("Processes for UID 501: \(userPIDs.count)")
+```
+
+```swift Get File Descriptors
+import BSDCore
+
+let proc = BSD.Proc(pid: getpid())
+
+// Get all file descriptors
+let fds = try proc.fileDescriptors
+
+for fd in fds {
+    print("FD: \(fd.proc_fd)")
+    print("Type: \(fd.proc_fdtype)")
+}
+```
+
+```swift Get Thread Information
+import BSDCore
+
+let proc = BSD.Proc(pid: getpid())
+
+// Get thread IDs
+let threadIDs = try proc.threadIDs
+print("Thread count: \(threadIDs.count)")
+
+for threadID in threadIDs {
+    let info = try proc.threadInfo(threadID: threadID)
+    print("Thread \(threadID): \(info.pth_user_time) user time")
+}
+```
+
+```swift Get Architecture Info
+import BSDCore
+
+let proc = BSD.Proc(pid: 1234)
+let archInfo = try proc.archInfo
+
+print("CPU type: \(archInfo.p_cputype)")
+print("CPU subtype: \(archInfo.p_cpusubtype)")
+```
+
+</CodeGroup>
+
+## Kernel Message Buffer
+
+```swift
+public static func getKernelMessageBuffer(
+    largeBuffer: Bool = true
+) throws -> Data
+```
+
+<ParamField path="largeBuffer" type="Bool">
+  Whether to use a large buffer (131072 bytes) or small (16384 bytes). Default is true.
+</ParamField>
+
+Gets the kernel message buffer. This must be called with root privileges.
+
+```swift
+import BSDCore
+
+// Get kernel messages (requires root)
+let messages = try BSD.Proc.getKernelMessageBuffer()
+if let messageString = String(data: messages, encoding: .utf8) {
+    print(messageString)
+}
+```
+
+## Notes
+
+- Most operations require appropriate privileges
+- Many properties throw errors if the process doesn't exist or access is denied
+- Thread addresses are pointers to thread-specific data structures
+- The `proc_info` call is more efficient than multiple individual queries

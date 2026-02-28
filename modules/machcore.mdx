@@ -1,0 +1,632 @@
+---
+title: 'MachCore Module'
+description: 'Comprehensive interface to the Mach microkernel subsystem of XNU'
+---
+
+## Overview
+
+MachCore provides Swift wrappers for the Mach portion of the XNU kernel. This is the most stable and feature-complete module in Kass, offering access to tasks, threads, ports, virtual memory management, IPC messaging, and more.
+
+<Note>
+**Source Location**: `Sources/Mach/Core/`
+
+**Dependencies**: KassHelpers, KassC, Linking
+</Note>
+
+## Core Components
+
+### Mach Namespace
+
+The main entry point for all Mach operations:
+
+```swift Mach.swift:6-23
+public struct Mach: KassHelpers.Namespace {
+    /// Executes a function that returns a Mach error code and throws an error if it fails.
+    public static func call(_ call: @autoclosure () -> kern_return_t) throws {
+        let kr = call()
+        guard kr == KERN_SUCCESS else {
+            guard let typedCode = MachError.Code(rawValue: kr) else {
+                throw NSError(domain: NSMachErrorDomain, code: Int(kr))
+            }
+            throw MachError(typedCode)
+        }
+    }
+}
+```
+
+The `Mach.call()` function is used throughout the module to wrap kernel calls and convert return codes to Swift errors.
+
+## Tasks
+
+### Mach.Task
+
+Represents a task (process) in the Mach kernel:
+
+<Tabs>
+  <Tab title="Basic Usage">
+```swift Task.swift:11-44
+let currentTask = Mach.Task.current
+
+// Get task's PID
+let pid = try currentTask.pid
+
+// Suspend and resume
+try currentTask.suspend()
+try currentTask.resume()
+
+// Terminate task
+try currentTask.terminate()
+
+// Get task for PID
+let task = try Mach.Task.forPID(1234)
+```
+  </Tab>
+  
+  <Tab title="Advanced Features">
+```swift Task.swift:46-68
+// Suspend with token (more robust)
+let token = try currentTask.suspend2()
+try currentTask.resume2(token: token)
+
+// Get all threads
+let threads = try currentTask.threads
+
+// Get all ports in task's namespace
+let ports = try currentTask.ports
+
+// Set physical footprint limit
+let oldLimit = try currentTask.setPhysicalFootprintLimit(1024 * 1024 * 100)
+```
+  </Tab>
+  
+  <Tab title="Task Roles">
+```swift Task.swift:115-128
+// Get current role
+let role = try currentTask.role
+
+// Set task role
+try currentTask.setRole(to: .foreground)
+
+// Available roles:
+// - .foreground
+// - .background  
+// - .control
+// - .graphicsServer
+// - .throttle
+// - .default
+```
+  </Tab>
+</Tabs>
+
+### Task Special Ports
+
+Tasks have special ports for various purposes:
+
+```swift
+// Get task's bootstrap port
+let bootstrapPort = try task.getSpecialPort(.bootstrap)
+
+// Get task's host port
+let hostPort = try task.getSpecialPort(.host)
+
+// Set a special port
+try task.setSpecialPort(.kernel, to: somePort)
+```
+
+## Threads
+
+### Mach.Thread
+
+Represents a thread within a task:
+
+<CodeGroup>
+```swift Creating Threads
+// Create a new thread (undefined state)
+let thread = try Mach.Thread(inTask: task)
+
+// Create a running thread with initial state
+var state = arm_thread_state64_t()
+state.__pc = 0x100000000
+state.__sp = 0x200000000
+let runningThread = try Mach.Thread(
+    inTask: task,
+    runningWithState: Mach.ThreadState.arm64(state)
+)
+```
+
+```swift Thread Control
+// Current thread
+let currentThread = Mach.Thread.current
+
+// Suspend and resume
+try thread.suspend()
+try thread.resume()
+
+// Abort thread
+try thread.abort(safely: true)
+
+// Terminate thread
+try thread.terminate()
+```
+
+```swift Thread Switching
+// Switch to another thread
+try Mach.Thread.switch(
+    to: thread,
+    option: .depress,
+    timeout: 1000
+)
+
+// Abort depression
+try thread.abortDepression()
+```
+</CodeGroup>
+
+## Ports
+
+### Mach.Port
+
+Ports are the fundamental IPC primitive in Mach:
+
+<Tabs>
+  <Tab title="Basic Operations">
+```swift Port.swift:172-238
+// Create a port reference
+let port = Mach.Port(named: portName, inNameSpaceOf: task)
+
+// Get port rights
+let rights = try port.rights
+if rights.contains(.send) {
+    print("Port has send right")
+}
+
+// Port context
+let context = try port.getContext()
+try port.setContext(to: newContext)
+
+// Get send right count
+let count = try port.sendRightCount
+```
+  </Tab>
+  
+  <Tab title="Port Construction">
+```swift Port.swift:8-128
+// Construct a port with flags
+let constructFlags: Mach.PortConstructFlags = [
+    .insertSendRight,
+    .contextAsGuard,
+    .strict
+]
+
+// Available construction flags:
+// - .contextAsGuard
+// - .queueLimit
+// - .insertSendRight
+// - .strict
+// - .immovableReceive
+// - .replyPort
+// - .connectionPort
+// - .servicePort
+```
+  </Tab>
+  
+  <Tab title="Port Guards">
+```swift Port.swift:326-366
+// Guard a port with context
+let guardContext: mach_port_context_t = 0x1234567890ABCDEF
+try port.guard(with: guardContext, flags: [.strict])
+
+// Unguard the port
+try port.unguard(with: guardContext)
+
+// Check if port is guarded (experimental)
+if port.guarded {
+    print("Port is guarded")
+}
+```
+  </Tab>
+</Tabs>
+
+### Port Rights
+
+```swift Port.swift:132-169
+// Available port rights
+public struct PortRights: OptionSet {
+    public static let send        // Send messages
+    public static let receive     // Receive messages
+    public static let sendOnce    // Send one message
+    public static let portSet     // Port set membership
+    public static let deadName    // Dead name notification
+}
+```
+
+## Virtual Memory
+
+### VirtualMemoryManager
+
+Manage virtual memory in a task's address space:
+
+<Tabs>
+  <Tab title="Allocation">
+```swift VirtualMemoryManager.swift:124-143
+let vm = task.vm
+
+// Allocate memory
+var pointer: UnsafeRawPointer? = nil
+try vm.allocate(
+    &pointer,
+    size: 4096,
+    flags: [.anywhere]
+)
+
+// Deallocate memory
+try vm.deallocate(pointer, size: 4096)
+```
+  </Tab>
+  
+  <Tab title="Reading & Writing">
+```swift VirtualMemoryManager.swift:234-303
+// Read memory
+let buffer = try vm.read(
+    from: remotePointer,
+    size: 1024
+)
+
+// Write memory
+try vm.write(
+    to: remotePointer,
+    from: buffer
+)
+
+// Read typed value
+let value: Int64 = try vm.read(from: pointer)
+
+// Write typed value
+try vm.write(42, to: pointer)
+
+// Read null-terminated string
+let string = try vm.readNullTerminatedString(
+    from: stringPointer,
+    encoding: .utf8
+)
+```
+  </Tab>
+  
+  <Tab title="Protection">
+```swift VirtualMemoryManager.swift:206-230
+// Set memory protection
+try vm.protect(
+    pointer,
+    size: 4096,
+    setMaximum: false,
+    protection: [.read, .write, .execute]
+)
+
+// Protection options:
+// - .none
+// - .read
+// - .write
+// - .execute
+
+// Set inheritance
+try vm.inherit(
+    pointer,
+    size: 4096,
+    inherit: .copy
+)
+```
+  </Tab>
+  
+  <Tab title="Region Info">
+```swift VirtualMemoryManager.swift:647-691
+// Get region information
+var regionPtr = pointer
+let (basicInfo, size) = try vm.region(
+    &regionPtr,
+    flavor: .basic,
+    as: vm_region_basic_info_64.self
+)
+
+// Get region size only
+let regionSize = try vm.regionSize(&regionPtr)
+
+// Get extended info
+let extendedInfo = try vm.regionExtendedInfo(&regionPtr)
+
+// Get recursive submap info
+var depth: UInt32 = 0
+let (submapInfo, _) = try vm.regionRecurse(&regionPtr, depth: &depth)
+```
+  </Tab>
+</Tabs>
+
+### Memory Mapping
+
+```swift VirtualMemoryManager.swift:353-390
+// Create memory entry
+var entrySize = vm_size_t(4096)
+let entry = try Mach.MemoryEntry(
+    task: task,
+    pointer: sourcePointer,
+    size: &entrySize,
+    protection: [.read, .write]
+)
+
+// Map memory entry
+var mappedPointer: UnsafeRawPointer? = nil
+try vm.map(
+    into: &mappedPointer,
+    size: 4096,
+    flags: [.anywhere],
+    entry: entry,
+    currentProtection: [.read],
+    maxProtection: [.read, .write],
+    inheritance: .copy
+)
+```
+
+## Messaging
+
+### Mach.Message
+
+Send and receive IPC messages:
+
+<CodeGroup>
+```swift Creating Messages
+// Create simple message
+let message = Mach.Message(
+    payload: Data([0x01, 0x02, 0x03, 0x04])
+)
+
+// Create message with descriptors
+let portDescriptor = Mach.PortDescriptor(
+    port: somePort,
+    disposition: .makeSend
+)
+let complexMessage = Mach.Message(
+    descriptors: [portDescriptor],
+    payload: payloadData
+)
+```
+
+```swift Sending Messages
+// Serialize and send
+message.withUnsafeSerializedMessage { headerPtr in
+    try Mach.call(
+        mach_msg(
+            headerPtr,
+            MACH_SEND_MSG,
+            headerPtr.pointee.msgh_size,
+            0,
+            MACH_PORT_NULL,
+            MACH_MSG_TIMEOUT_NONE,
+            MACH_PORT_NULL
+        )
+    )
+}
+```
+
+```swift Receiving Messages
+// Receive message
+let buffer = UnsafeMutablePointer<mach_msg_header_t>.allocate(
+    capacity: 1024
+)
+defer { buffer.deallocate() }
+
+try Mach.call(
+    mach_msg(
+        buffer,
+        MACH_RCV_MSG,
+        0,
+        1024,
+        receivePort.name,
+        MACH_MSG_TIMEOUT_NONE,
+        MACH_PORT_NULL
+    )
+)
+
+let receivedMessage = Mach.Message(headerPointer: buffer)
+```
+</CodeGroup>
+
+## Host Information
+
+### Mach.Host
+
+Access host (system) information:
+
+```swift HostInfo.swift:65-114
+let host = Mach.Host.current
+
+// Get basic host info
+let basicInfo = try host.info.basic
+print("CPU count: \(basicInfo.avail_cpus)")
+print("Memory size: \(basicInfo.max_mem)")
+
+// Get scheduling info
+let schedInfo = try host.info.scheduling
+
+// Get priority info
+let priorityInfo = try host.info.priority
+
+// Check capabilities
+let _ = try host.info.supportsSemaphoreTraps
+let _ = try host.info.supportsMachMsgTraps
+
+// VM purgeable info
+let vmPurgeableInfo = try host.info.vmPurgeable
+
+// Preferred architecture
+let preferredArch = try host.info.preferredUserSpaceArchitecture
+```
+
+## Processor Information
+
+```swift
+// Get processor info
+let processor = Mach.Processor.current
+let processorInfo = try processor.info
+
+// Get processor set
+let processorSet = try host.getDefaultProcessorSet()
+let processorSetInfo = try processorSet.info
+```
+
+## Timing & Synchronization
+
+### Clocks
+
+```swift
+// Get system clock
+let systemClock = try Mach.Host.current.getClock(.system)
+
+// Get current time
+let time = try systemClock.getTime()
+
+// Sleep using clock
+try systemClock.sleep(until: time + 1000)
+```
+
+### Semaphores
+
+```swift
+// Create semaphore
+let semaphore = try Mach.Semaphore(
+    inTask: task,
+    policy: .fifo,
+    value: 0
+)
+
+// Wait and signal
+try semaphore.wait()
+try semaphore.signal()
+```
+
+## Common Use Cases
+
+<AccordionGroup>
+  <Accordion title="Task Inspection">
+```swift
+// Get task for running process
+let task = try Mach.Task.forPID(processID)
+
+// Enumerate threads
+for thread in try task.threads {
+    let state = try thread.getState(Mach.ThreadState<arm_thread_state64_t>.self)
+    print("Thread PC: 0x\(String(state.data.__pc, radix: 16))")
+}
+
+// Inspect memory regions
+var pointer: UnsafeRawPointer? = UnsafeRawPointer(bitPattern: 0x100000000)
+while let ptr = pointer {
+    let (info, size) = try task.vm.region(
+        &pointer,
+        flavor: .basic,
+        as: vm_region_basic_info_64.self
+    )
+    print("Region at \(ptr): size=\(size), protection=\(info.protection)")
+    
+    // Move to next region
+    pointer = ptr.advanced(by: Int(size))
+}
+```
+  </Accordion>
+  
+  <Accordion title="Inter-Process Communication">
+```swift
+// Allocate receive right
+var port = mach_port_t()
+try Mach.call(mach_port_allocate(
+    task.name,
+    MACH_PORT_RIGHT_RECEIVE,
+    &port
+))
+
+// Insert send right
+try Mach.call(mach_port_insert_right(
+    task.name,
+    port,
+    port,
+    mach_msg_type_name_t(MACH_MSG_TYPE_MAKE_SEND)
+))
+
+// Send message to port
+let message = Mach.Message(payload: Data("Hello".utf8))
+message.header.msgh_remote_port = port
+message.header.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0)
+
+message.withUnsafeSerializedMessage { headerPtr in
+    try Mach.call(mach_msg_send(headerPtr))
+}
+```
+  </Accordion>
+  
+  <Accordion title="Memory Manipulation">
+```swift
+let targetTask = try Mach.Task.forPID(targetPID)
+let vm = targetTask.vm
+
+// Allocate RWX memory
+var shellcodePtr: UnsafeRawPointer? = nil
+try vm.allocate(&shellcodePtr, size: 4096, flags: [.anywhere])
+try vm.protect(
+    shellcodePtr,
+    size: 4096,
+    setMaximum: false,
+    protection: [.read, .write]
+)
+
+// Write code
+let code: [UInt8] = [0xC0, 0x03, 0x5F, 0xD6] // RET instruction
+try code.withUnsafeBytes { codeBytes in
+    try vm.write(to: shellcodePtr, from: codeBytes)
+}
+
+// Make executable
+try vm.protect(
+    shellcodePtr,
+    size: 4096,
+    setMaximum: false,
+    protection: [.read, .execute]
+)
+```
+  </Accordion>
+</AccordionGroup>
+
+## Error Handling
+
+MachCore uses `MachError` for all kernel errors:
+
+```swift
+do {
+    try Mach.call(some_mach_function())
+} catch MachError.invalidArgument {
+    print("Invalid argument passed")
+} catch MachError.noAccess {
+    print("Permission denied")
+} catch let error as MachError {
+    print("Mach error: \(error.code)")
+}
+```
+
+## Performance Considerations
+
+<Warning>
+- Mach calls are expensive kernel traps
+- Batch operations when possible
+- Cache port references
+- Use virtual memory operations sparingly
+- Consider memory alignment for better performance
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="BSDCore Module" icon="terminal" href="/modules/bsdcore">
+    Learn about BSD kernel interaction
+  </Card>
+  
+  <Card title="Shellcode Module" icon="code" href="/modules/shellcode">
+    Inject and execute code in tasks
+  </Card>
+</CardGroup>

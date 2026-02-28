@@ -1,0 +1,569 @@
+---
+title: "Filesystem API"
+description: "File system operations, attributes, and metadata access in BSDCore"
+---
+
+## Overview
+
+The BSDCore Filesystem API provides powerful low-level access to file and directory attributes through the `getattrlist` system call. This API allows you to efficiently retrieve multiple file attributes in a single system call.
+
+## FSOptions
+
+Options for file system operations.
+
+```swift
+public struct FSOptions: OptionSet
+```
+
+### Properties
+
+<ParamField path="rawValue" type="UInt32">
+  The raw value of the options
+</ParamField>
+
+<ParamField path="name" type="String?">
+  The name of the option, if it can be determined
+</ParamField>
+
+### Static Properties
+
+<ResponseField name="noFollow" type="FSOptions">
+  Do not follow symbolic links
+</ResponseField>
+
+<ResponseField name="noFollowWithError" type="FSOptions">
+  Same as `noFollow`, but returns an error if a symbolic link is encountered
+</ResponseField>
+
+<ResponseField name="noInMemoryUpdate" type="FSOptions">
+  Prevent in-memory updates
+</ResponseField>
+
+<ResponseField name="reportFullSize" type="FSOptions">
+  Report the full size of files
+</ResponseField>
+
+<ResponseField name="returnInvalidAttributes" type="FSOptions">
+  Return invalid attributes in the result
+</ResponseField>
+
+<ResponseField name="useExtendedCommonAttributes" type="FSOptions">
+  Use extended common attributes
+</ResponseField>
+
+<ResponseField name="exchangeDataOnly" type="FSOptions">
+  Exchange data only (private option)
+</ResponseField>
+
+<ResponseField name="listSnapshot" type="FSOptions">
+  List snapshot (private option)
+</ResponseField>
+
+<ResponseField name="noFirmlinkPath" type="FSOptions">
+  Do not resolve firmlink paths (private option)
+</ResponseField>
+
+<ResponseField name="followFirmlink" type="FSOptions">
+  Follow firmlinks (private option)
+</ResponseField>
+
+<ResponseField name="returnRealDevice" type="FSOptions">
+  Return the real device (private option)
+</ResponseField>
+
+<ResponseField name="utimesNull" type="FSOptions">
+  Set times to null (private option)
+</ResponseField>
+
+## Attribute Types
+
+### FSCommonAttributes
+
+Common file and directory attributes.
+
+```swift
+public struct FSCommonAttributes: OptionSet
+```
+
+#### Available Attributes
+
+<ResponseField name="returnedAttributes" type="FSCommonAttributes">
+  The attributes that were actually returned
+</ResponseField>
+
+<ResponseField name="name" type="FSCommonAttributes">
+  The name of the file or directory
+</ResponseField>
+
+<ResponseField name="deviceID" type="FSCommonAttributes">
+  The device ID
+</ResponseField>
+
+<ResponseField name="filesystemID" type="FSCommonAttributes">
+  The filesystem ID
+</ResponseField>
+
+<ResponseField name="objectType" type="FSCommonAttributes">
+  The object type (file, directory, etc.)
+</ResponseField>
+
+<ResponseField name="objectTag" type="FSCommonAttributes">
+  The object tag
+</ResponseField>
+
+<ResponseField name="objectID" type="FSCommonAttributes">
+  The object ID
+</ResponseField>
+
+<ResponseField name="objectPermanentID" type="FSCommonAttributes">
+  The permanent object ID
+</ResponseField>
+
+<ResponseField name="parentObjectID" type="FSCommonAttributes">
+  The parent object ID
+</ResponseField>
+
+<ResponseField name="textEncoding" type="FSCommonAttributes">
+  The text encoding
+</ResponseField>
+
+<ResponseField name="creationTime" type="FSCommonAttributes">
+  The creation time
+</ResponseField>
+
+<ResponseField name="modificationTime" type="FSCommonAttributes">
+  The modification time
+</ResponseField>
+
+<ResponseField name="changeTime" type="FSCommonAttributes">
+  The change time
+</ResponseField>
+
+<ResponseField name="accessTime" type="FSCommonAttributes">
+  The access time
+</ResponseField>
+
+<ResponseField name="backupTime" type="FSCommonAttributes">
+  The backup time
+</ResponseField>
+
+<ResponseField name="finderInfo" type="FSCommonAttributes">
+  The Finder info
+</ResponseField>
+
+<ResponseField name="ownerID" type="FSCommonAttributes">
+  The owner user ID
+</ResponseField>
+
+<ResponseField name="groupID" type="FSCommonAttributes">
+  The group ID
+</ResponseField>
+
+<ResponseField name="accessMask" type="FSCommonAttributes">
+  The access mask (permissions)
+</ResponseField>
+
+<ResponseField name="flags" type="FSCommonAttributes">
+  The file flags
+</ResponseField>
+
+<ResponseField name="generationCount" type="FSCommonAttributes">
+  The generation count
+</ResponseField>
+
+<ResponseField name="documentID" type="FSCommonAttributes">
+  The document ID
+</ResponseField>
+
+<ResponseField name="userAccess" type="FSCommonAttributes">
+  The user access permissions
+</ResponseField>
+
+<ResponseField name="extendedSecurity" type="FSCommonAttributes">
+  Extended security attributes
+</ResponseField>
+
+<ResponseField name="ownerUUID" type="FSCommonAttributes">
+  The owner UUID
+</ResponseField>
+
+<ResponseField name="groupUUID" type="FSCommonAttributes">
+  The group UUID
+</ResponseField>
+
+<ResponseField name="fileID" type="FSCommonAttributes">
+  The file ID
+</ResponseField>
+
+<ResponseField name="parentID" type="FSCommonAttributes">
+  The parent directory ID
+</ResponseField>
+
+<ResponseField name="fullPath" type="FSCommonAttributes">
+  The full path
+</ResponseField>
+
+<ResponseField name="addedTime" type="FSCommonAttributes">
+  The time when the file was added
+</ResponseField>
+
+<ResponseField name="dataProtectionClass" type="FSCommonAttributes">
+  The data protection class
+</ResponseField>
+
+### FSVolumeAttributes
+
+Volume-specific attributes.
+
+```swift
+public struct FSVolumeAttributes: OptionSet
+```
+
+#### Available Attributes
+
+<ResponseField name="fileSystemType" type="FSVolumeAttributes">
+  The filesystem type
+</ResponseField>
+
+<ResponseField name="signature" type="FSVolumeAttributes">
+  The volume signature
+</ResponseField>
+
+<ResponseField name="size" type="FSVolumeAttributes">
+  The total size of the volume
+</ResponseField>
+
+<ResponseField name="freeSpace" type="FSVolumeAttributes">
+  The free space on the volume
+</ResponseField>
+
+<ResponseField name="availableSpace" type="FSVolumeAttributes">
+  The available space on the volume
+</ResponseField>
+
+<ResponseField name="usedSpace" type="FSVolumeAttributes">
+  The used space on the volume
+</ResponseField>
+
+<ResponseField name="minimumAllocationSize" type="FSVolumeAttributes">
+  The minimum allocation size
+</ResponseField>
+
+<ResponseField name="allocationClumpSize" type="FSVolumeAttributes">
+  The allocation clump size
+</ResponseField>
+
+<ResponseField name="ioBlockSize" type="FSVolumeAttributes">
+  The I/O block size
+</ResponseField>
+
+<ResponseField name="objectCount" type="FSVolumeAttributes">
+  The total number of objects
+</ResponseField>
+
+<ResponseField name="fileCount" type="FSVolumeAttributes">
+  The number of files
+</ResponseField>
+
+<ResponseField name="directoryCount" type="FSVolumeAttributes">
+  The number of directories
+</ResponseField>
+
+<ResponseField name="maximumObjectCount" type="FSVolumeAttributes">
+  The maximum number of objects
+</ResponseField>
+
+<ResponseField name="mountPoint" type="FSVolumeAttributes">
+  The mount point path
+</ResponseField>
+
+<ResponseField name="name" type="FSVolumeAttributes">
+  The volume name
+</ResponseField>
+
+<ResponseField name="mountFlags" type="FSVolumeAttributes">
+  The mount flags
+</ResponseField>
+
+<ResponseField name="mountedDevice" type="FSVolumeAttributes">
+  The mounted device
+</ResponseField>
+
+<ResponseField name="encodingsUsed" type="FSVolumeAttributes">
+  The text encodings used
+</ResponseField>
+
+<ResponseField name="capabilities" type="FSVolumeAttributes">
+  The volume capabilities
+</ResponseField>
+
+<ResponseField name="uuid" type="FSVolumeAttributes">
+  The volume UUID
+</ResponseField>
+
+<ResponseField name="maximumSize" type="FSVolumeAttributes">
+  The maximum quota size
+</ResponseField>
+
+<ResponseField name="minimumSize" type="FSVolumeAttributes">
+  The minimum reserved size
+</ResponseField>
+
+<ResponseField name="attributes" type="FSVolumeAttributes">
+  The volume attributes
+</ResponseField>
+
+<ResponseField name="fileSystemTypeName" type="FSVolumeAttributes">
+  The filesystem type name
+</ResponseField>
+
+<ResponseField name="fileSystemSubtype" type="FSVolumeAttributes">
+  The filesystem subtype
+</ResponseField>
+
+### FSDirectoryAttributes
+
+Directory-specific attributes.
+
+```swift
+public struct FSDirectoryAttributes: OptionSet
+```
+
+#### Available Attributes
+
+<ResponseField name="linkCount" type="FSDirectoryAttributes">
+  The number of hard links
+</ResponseField>
+
+<ResponseField name="entryCount" type="FSDirectoryAttributes">
+  The number of entries in the directory
+</ResponseField>
+
+<ResponseField name="mountStatus" type="FSDirectoryAttributes">
+  The mount status
+</ResponseField>
+
+<ResponseField name="physicalSize" type="FSDirectoryAttributes">
+  The physical size allocated
+</ResponseField>
+
+<ResponseField name="ioBlockSize" type="FSDirectoryAttributes">
+  The I/O block size
+</ResponseField>
+
+<ResponseField name="logicalSize" type="FSDirectoryAttributes">
+  The logical size
+</ResponseField>
+
+### FSFileAttributes
+
+File-specific attributes.
+
+```swift
+public struct FSFileAttributes: OptionSet
+```
+
+#### Available Attributes
+
+<ResponseField name="linkCount" type="FSFileAttributes">
+  The number of hard links
+</ResponseField>
+
+<ResponseField name="logicalSize" type="FSFileAttributes">
+  The total logical size
+</ResponseField>
+
+<ResponseField name="physicalSize" type="FSFileAttributes">
+  The total physical size allocated
+</ResponseField>
+
+<ResponseField name="ioBlockSize" type="FSFileAttributes">
+  The I/O block size
+</ResponseField>
+
+<ResponseField name="clumpSize" type="FSFileAttributes">
+  The clump size
+</ResponseField>
+
+<ResponseField name="deviceType" type="FSFileAttributes">
+  The device type (for device files)
+</ResponseField>
+
+<ResponseField name="forkCount" type="FSFileAttributes">
+  The number of forks
+</ResponseField>
+
+<ResponseField name="forkList" type="FSFileAttributes">
+  The list of forks
+</ResponseField>
+
+<ResponseField name="dataLogicalSize" type="FSFileAttributes">
+  The data fork logical size
+</ResponseField>
+
+<ResponseField name="dataPhysicalSize" type="FSFileAttributes">
+  The data fork physical size
+</ResponseField>
+
+<ResponseField name="resourceLogicalSize" type="FSFileAttributes">
+  The resource fork logical size
+</ResponseField>
+
+<ResponseField name="resourcePhysicalSize" type="FSFileAttributes">
+  The resource fork physical size
+</ResponseField>
+
+### FSCommonExtendedAttributes
+
+Extended common attributes.
+
+```swift
+public struct FSCommonExtendedAttributes: OptionSet
+```
+
+#### Available Attributes
+
+<ResponseField name="relativePath" type="FSCommonExtendedAttributes">
+  The relative path
+</ResponseField>
+
+<ResponseField name="privateSize" type="FSCommonExtendedAttributes">
+  The private size
+</ResponseField>
+
+<ResponseField name="linkID" type="FSCommonExtendedAttributes">
+  The link ID
+</ResponseField>
+
+<ResponseField name="pathWithNoFirmlinks" type="FSCommonExtendedAttributes">
+  The path without firmlinks resolved
+</ResponseField>
+
+<ResponseField name="realDeviceID" type="FSCommonExtendedAttributes">
+  The real device ID
+</ResponseField>
+
+<ResponseField name="realFilesystemID" type="FSCommonExtendedAttributes">
+  The real filesystem ID
+</ResponseField>
+
+<ResponseField name="cloneID" type="FSCommonExtendedAttributes">
+  The clone ID
+</ResponseField>
+
+<ResponseField name="extraFlags" type="FSCommonExtendedAttributes">
+  Extra flags
+</ResponseField>
+
+<ResponseField name="recursiveGenerationCount" type="FSCommonExtendedAttributes">
+  The recursive generation count
+</ResponseField>
+
+<ResponseField name="attributionTag" type="FSCommonExtendedAttributes">
+  The attribution tag
+</ResponseField>
+
+<ResponseField name="cloneReferenceCount" type="FSCommonExtendedAttributes">
+  The clone reference count
+</ResponseField>
+
+## Getting Attributes
+
+Use the `attrlist` extension to retrieve file attributes.
+
+### Method
+
+```swift
+public func get(
+    for path: String,
+    options: BSD.FSOptions
+) throws -> BSD.FSAttributeBuffer
+```
+
+<ParamField path="path" type="String" required>
+  The path to the file or directory
+</ParamField>
+
+<ParamField path="options" type="BSD.FSOptions" required>
+  Options for the operation
+</ParamField>
+
+### Example Usage
+
+<CodeGroup>
+
+```swift Basic Attributes
+import BSDCore
+
+// Create an attribute list
+var attrList = attrlist(
+    commonAttributes: [.name, .modificationTime, .creationTime],
+    fileAttributes: [.logicalSize, .physicalSize]
+)
+
+// Get attributes for a file
+let buffer = try attrList.get(
+    for: "/path/to/file.txt",
+    options: []
+)
+
+// Parse the buffer to access attributes
+```
+
+```swift Volume Attributes
+import BSDCore
+
+// Get volume information
+var attrList = attrlist(
+    volumeAttributes: [
+        .size,
+        .freeSpace,
+        .availableSpace,
+        .name,
+        .mountPoint
+    ]
+)
+
+let buffer = try attrList.get(
+    for: "/",
+    options: []
+)
+```
+
+```swift Extended Attributes
+import BSDCore
+
+// Get extended attributes
+var attrList = attrlist(
+    commonAttributes: [.name, .fileID],
+    commonExtendedAttributes: [.cloneID, .realDeviceID]
+)
+
+let buffer = try attrList.get(
+    for: "/path/to/file",
+    options: .useExtendedCommonAttributes
+)
+```
+
+```swift No Follow Symlinks
+import BSDCore
+
+// Get attributes without following symlinks
+var attrList = attrlist(
+    commonAttributes: [.name, .objectType]
+)
+
+let buffer = try attrList.get(
+    for: "/path/to/symlink",
+    options: .noFollow
+)
+```
+
+</CodeGroup>
+
+## Notes
+
+- The `getattrlist` system call is more efficient than multiple `stat` calls when you need multiple attributes
+- Use `FSOptions.noFollow` to get information about symbolic links themselves rather than their targets
+- Extended common attributes require the `useExtendedCommonAttributes` option
+- The attribute buffer must be parsed according to the requested attributes in order

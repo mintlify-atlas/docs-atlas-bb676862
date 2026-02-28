@@ -1,0 +1,614 @@
+---
+title: "Code Signing API"
+description: "Code signing operations and process validation in BSDCore"
+---
+
+## Overview
+
+The BSDCore Code Signing API provides access to macOS code signing operations through the `csops` family of system calls. You can query and manipulate code signing attributes, retrieve entitlements, and validate processes.
+
+## CSFlags
+
+Code signing attributes (flags) for a process.
+
+```swift
+public struct CSFlags: OptionSet
+```
+
+### Properties
+
+<ParamField path="rawValue" type="UInt32">
+  The raw value of the flag
+</ParamField>
+
+<ParamField path="name" type="String?">
+  The name of the flag, if it can be determined
+</ParamField>
+
+### Available Flags
+
+<ResponseField name="valid" type="CSFlags">
+  The code signature is valid
+</ResponseField>
+
+<ResponseField name="adhoc" type="CSFlags">
+  The binary is ad-hoc signed
+</ResponseField>
+
+<ResponseField name="getTaskAllow" type="CSFlags">
+  The process allows task_for_pid (debugging)
+</ResponseField>
+
+<ResponseField name="installer" type="CSFlags">
+  The process is an installer
+</ResponseField>
+
+<ResponseField name="forcedLibraryValidation" type="CSFlags">
+  Library validation is forced
+</ResponseField>
+
+<ResponseField name="invalidAllowed" type="CSFlags">
+  Invalid signatures are allowed
+</ResponseField>
+
+<ResponseField name="hard" type="CSFlags">
+  Hard kill on signature failure
+</ResponseField>
+
+<ResponseField name="kill" type="CSFlags">
+  Kill process on invalid signature
+</ResponseField>
+
+<ResponseField name="checkExpiration" type="CSFlags">
+  Check certificate expiration
+</ResponseField>
+
+<ResponseField name="restrict" type="CSFlags">
+  Restrict to Apple-signed binaries
+</ResponseField>
+
+<ResponseField name="enforcement" type="CSFlags">
+  Enforcement is enabled
+</ResponseField>
+
+<ResponseField name="requireLibraryValidation" type="CSFlags">
+  Library validation is required
+</ResponseField>
+
+<ResponseField name="entitlementsValidated" type="CSFlags">
+  Entitlements have been validated
+</ResponseField>
+
+<ResponseField name="nvramUnrestricted" type="CSFlags">
+  NVRAM access is unrestricted
+</ResponseField>
+
+<ResponseField name="runtime" type="CSFlags">
+  Hardened runtime is enabled
+</ResponseField>
+
+<ResponseField name="linkerSigned" type="CSFlags">
+  Signed by the linker
+</ResponseField>
+
+<ResponseField name="execSetHard" type="CSFlags">
+  Set hard flag on exec
+</ResponseField>
+
+<ResponseField name="execSetKill" type="CSFlags">
+  Set kill flag on exec
+</ResponseField>
+
+<ResponseField name="execSetEnforcement" type="CSFlags">
+  Set enforcement flag on exec
+</ResponseField>
+
+<ResponseField name="execInheritSIP" type="CSFlags">
+  Inherit SIP on exec
+</ResponseField>
+
+<ResponseField name="killed" type="CSFlags">
+  Process was killed due to signature failure
+</ResponseField>
+
+<ResponseField name="noUntrustedHelpers" type="CSFlags">
+  No untrusted helpers allowed
+</ResponseField>
+
+<ResponseField name="platformBinary" type="CSFlags">
+  Platform binary
+</ResponseField>
+
+<ResponseField name="platformPath" type="CSFlags">
+  Binary is in a platform path
+</ResponseField>
+
+<ResponseField name="debugged" type="CSFlags">
+  Process is being debugged
+</ResponseField>
+
+<ResponseField name="signed" type="CSFlags">
+  Binary is signed
+</ResponseField>
+
+<ResponseField name="devCode" type="CSFlags">
+  Development code
+</ResponseField>
+
+<ResponseField name="dataVaultController" type="CSFlags">
+  Data vault controller
+</ResponseField>
+
+## CSOperation
+
+Code signing operations.
+
+```swift
+public struct CSOperation
+```
+
+### Available Operations
+
+<ResponseField name="getStatus" type="CSOperation">
+  Get code signing status flags
+</ResponseField>
+
+<ResponseField name="markInvalid" type="CSOperation">
+  Mark the process as invalid
+</ResponseField>
+
+<ResponseField name="markHard" type="CSOperation">
+  Set the HARD flag
+</ResponseField>
+
+<ResponseField name="markKill" type="CSOperation">
+  Set the KILL flag
+</ResponseField>
+
+<ResponseField name="getCDHash" type="CSOperation">
+  Get the code directory hash
+</ResponseField>
+
+<ResponseField name="getPIDOffset" type="CSOperation">
+  Get the offset of the active Mach-O slice
+</ResponseField>
+
+<ResponseField name="getEntitlementsBlob" type="CSOperation">
+  Get the entitlements blob (XML format)
+</ResponseField>
+
+<ResponseField name="markRestrict" type="CSOperation">
+  Set the RESTRICT flag
+</ResponseField>
+
+<ResponseField name="setStatus" type="CSOperation">
+  Set code signing status flags
+</ResponseField>
+
+<ResponseField name="getCSBlob" type="CSOperation">
+  Get the code signing blob
+</ResponseField>
+
+<ResponseField name="getIdentity" type="CSOperation">
+  Get the code signing identity
+</ResponseField>
+
+<ResponseField name="clearInstallerFlags" type="CSOperation">
+  Clear installer-related flags
+</ResponseField>
+
+<ResponseField name="getTeamID" type="CSOperation">
+  Get the team ID
+</ResponseField>
+
+<ResponseField name="clearLibraryValidationFlags" type="CSOperation">
+  Clear library validation flags
+</ResponseField>
+
+<ResponseField name="getDEREntitlementsBlob" type="CSOperation">
+  Get the entitlements blob (DER format)
+</ResponseField>
+
+<ResponseField name="getValidationCategory" type="CSOperation">
+  Get the validation category
+</ResponseField>
+
+## CSValidationCategory
+
+Code signing validation categories.
+
+```swift
+public struct CSValidationCategory
+```
+
+### Available Categories
+
+<ResponseField name="invalid" type="CSValidationCategory">
+  Invalid validation category
+</ResponseField>
+
+<ResponseField name="platform" type="CSValidationCategory">
+  Platform binary
+</ResponseField>
+
+<ResponseField name="testFlight" type="CSValidationCategory">
+  TestFlight app
+</ResponseField>
+
+<ResponseField name="development" type="CSValidationCategory">
+  Development signed
+</ResponseField>
+
+<ResponseField name="appStore" type="CSValidationCategory">
+  App Store app
+</ResponseField>
+
+<ResponseField name="enterprise" type="CSValidationCategory">
+  Enterprise signed
+</ResponseField>
+
+<ResponseField name="developerID" type="CSValidationCategory">
+  Developer ID signed
+</ResponseField>
+
+<ResponseField name="localSigning" type="CSValidationCategory">
+  Local signing
+</ResponseField>
+
+<ResponseField name="rosetta" type="CSValidationCategory">
+  Rosetta translated
+</ResponseField>
+
+<ResponseField name="OOP_JIT" type="CSValidationCategory">
+  Out-of-process JIT
+</ResponseField>
+
+<ResponseField name="none" type="CSValidationCategory">
+  No validation category
+</ResponseField>
+
+## CSOps Methods
+
+### call
+
+Performs a code signing operation on a process.
+
+```swift
+public static func call(
+    forPID pid: pid_t,
+    _ ops: CSOperation,
+    auditToken: audit_token_t? = nil,
+    dataIn: Data = Data(),
+    ignoreERANGE: Bool = false
+) throws -> Data
+```
+
+<ParamField path="pid" type="pid_t" required>
+  The process ID to operate on
+</ParamField>
+
+<ParamField path="ops" type="CSOperation" required>
+  The operation to perform
+</ParamField>
+
+<ParamField path="auditToken" type="audit_token_t?">
+  Optional audit token for the operation
+</ParamField>
+
+<ParamField path="dataIn" type="Data">
+  Input data for the operation (default: empty)
+</ParamField>
+
+<ParamField path="ignoreERANGE" type="Bool">
+  Whether to ignore ERANGE errors (default: false)
+</ParamField>
+
+### getStatus
+
+Gets the code signing status flags.
+
+```swift
+public static func getStatus(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> CSFlags
+```
+
+<ParamField path="pid" type="pid_t" required>
+  The process ID
+</ParamField>
+
+<ParamField path="auditToken" type="audit_token_t?">
+  Optional audit token
+</ParamField>
+
+### markInvalid
+
+Marks the process as invalid.
+
+```swift
+public static func markInvalid(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws
+```
+
+### markHard
+
+Sets the HARD flag.
+
+```swift
+public static func markHard(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws
+```
+
+### markKill
+
+Sets the KILL flag.
+
+```swift
+public static func markKill(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws
+```
+
+### getCDHash
+
+Gets the code directory hash.
+
+```swift
+public static func getCDHash(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> Data
+```
+
+### getPIDOffset
+
+Gets the offset of the active Mach-O slice.
+
+```swift
+public static func getPIDOffset(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> UInt64
+```
+
+### getEntitlementsBlob
+
+Gets the entitlements blob in XML format.
+
+```swift
+public static func getEntitlementsBlob(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> Data
+```
+
+### getDEREntitlementsBlob
+
+Gets the entitlements blob in DER format.
+
+```swift
+public static func getDEREntitlementsBlob(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> Data
+```
+
+### getIdentity
+
+Gets the code signing identity.
+
+```swift
+public static func getIdentity(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> String?
+```
+
+### getTeamID
+
+Gets the team ID.
+
+```swift
+public static func getTeamID(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> String?
+```
+
+### getCSBlob
+
+Gets the code signing blob.
+
+```swift
+public static func getCSBlob(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> Data
+```
+
+### setStatus
+
+Sets the code signing status flags.
+
+```swift
+public static func setStatus(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil,
+    _ flags: CSFlags
+) throws
+```
+
+### markRestrict
+
+Sets the RESTRICT flag.
+
+```swift
+public static func markRestrict(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws
+```
+
+### clearInstallerFlags
+
+Clears installer-related flags.
+
+```swift
+public static func clearInstallerFlags(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws
+```
+
+### clearPlatformFlags
+
+Clears platform-related flags.
+
+```swift
+public static func clearPlatformFlags(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws
+```
+
+### clearLibraryValidationFlags
+
+Clears the library validation flag. Currently restricted to the caller's PID with special entitlement.
+
+```swift
+public static func clearLibraryValidationFlags(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws
+```
+
+### getValidationCategory
+
+Gets the validation category.
+
+```swift
+public static func getValidationCategory(
+    forPID pid: pid_t,
+    auditToken: audit_token_t? = nil
+) throws -> CSValidationCategory
+```
+
+## Example Usage
+
+<CodeGroup>
+
+```swift Get Code Signing Status
+import BSDCore
+
+let pid = getpid()
+let flags = try BSD.CSOps.getStatus(forPID: pid)
+
+if flags.contains(.valid) {
+    print("Code signature is valid")
+}
+
+if flags.contains(.adhoc) {
+    print("Binary is ad-hoc signed")
+}
+
+if flags.contains(.runtime) {
+    print("Hardened runtime is enabled")
+}
+
+if flags.contains(.platformBinary) {
+    print("This is a platform binary")
+}
+```
+
+```swift Get Entitlements
+import BSDCore
+
+let pid: pid_t = 1234
+
+// Get XML entitlements
+let entitlementsData = try BSD.CSOps.getEntitlementsBlob(forPID: pid)
+if let entitlementsXML = String(data: entitlementsData, encoding: .utf8) {
+    print("Entitlements:\n\(entitlementsXML)")
+}
+```
+
+```swift Get Signing Identity and Team
+import BSDCore
+
+let pid = getpid()
+
+if let identity = try BSD.CSOps.getIdentity(forPID: pid) {
+    print("Signing identity: \(identity)")
+}
+
+if let teamID = try BSD.CSOps.getTeamID(forPID: pid) {
+    print("Team ID: \(teamID)")
+}
+```
+
+```swift Get Validation Category
+import BSDCore
+
+let pid: pid_t = 1234
+let category = try BSD.CSOps.getValidationCategory(forPID: pid)
+
+switch category.rawValue {
+case BSD.CSValidationCategory.appStore.rawValue:
+    print("App Store app")
+case BSD.CSValidationCategory.developerID.rawValue:
+    print("Developer ID signed")
+case BSD.CSValidationCategory.development.rawValue:
+    print("Development signed")
+case BSD.CSValidationCategory.platform.rawValue:
+    print("Platform binary")
+default:
+    print("Other category")
+}
+```
+
+```swift Get Code Directory Hash
+import BSDCore
+
+let pid = getpid()
+let cdHash = try BSD.CSOps.getCDHash(forPID: pid)
+
+print("CD Hash: \(cdHash.map { String(format: "%02x", $0) }.joined())")
+```
+
+```swift Check Multiple Processes
+import BSDCore
+
+let pids = try BSD.Proc.listPIDs(
+    BSD.ProcPIDListDescription(type: .all)
+)
+
+for pid in pids {
+    do {
+        let flags = try BSD.CSOps.getStatus(forPID: pid)
+        if flags.contains(.platformBinary) {
+            if let identity = try? BSD.CSOps.getIdentity(forPID: pid) {
+                print("PID \(pid): \(identity)")
+            }
+        }
+    } catch {
+        // Process may have exited or we lack permissions
+        continue
+    }
+}
+```
+
+</CodeGroup>
+
+## Notes
+
+- Most operations require appropriate entitlements or elevated privileges
+- The blob header is automatically stripped from blob operations
+- When `ignoreERANGE` is true, the operation will still copy available data even if ERANGE is returned
+- Audit tokens provide an alternative authentication mechanism
+- Library validation flag clearing is restricted to the caller's own PID

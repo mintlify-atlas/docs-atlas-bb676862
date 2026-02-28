@@ -1,0 +1,487 @@
+---
+title: BSD Layer Concepts
+description: Understanding BSD syscalls, filesystem operations, and process management in Kass
+---
+
+## Overview
+
+The BSD layer in XNU provides POSIX compatibility and higher-level system services. Kass's BSDCore module wraps these interfaces with type-safe Swift APIs.
+
+<Note>
+BSDCore is in active development and considered less stable than MachCore. APIs may change in future versions.
+</Note>
+
+## BSD Call Pattern
+
+BSDCore provides a unified error handling pattern for POSIX syscalls:
+
+```swift
+import BSDCore
+
+// The BSD.call() wrapper handles errno-based errors
+try BSD.call(some_posix_function())
+
+// Automatically converts errno to POSIXError
+do {
+    try BSD.call(open("/some/path", O_RDONLY))
+} catch let error as POSIXError {
+    print("Error code: \(error.code)")
+}
+```
+
+### Return Value Handling
+
+```swift
+// Most syscalls return -1 on error and set errno
+let fd = try BSD.call(open("/path/to/file", O_RDONLY))
+
+// Some syscalls return errno directly
+let result = try BSD.call(
+    posix_spawn(...),
+    returnsErrno: true  // Indicates return value IS errno
+)
+```
+
+<Info>
+BSD.call() automatically resets errno to 0 before calling, preventing false errors from previous operations.
+</Info>
+
+## Sysctl Interface
+
+Sysctl provides access to kernel state for both reading and writing:
+
+### Reading Kernel State
+
+<Tabs>
+  <Tab title="By Name">
+    ```swift
+    import BSDCore
+
+    // Get kernel version as string
+    let version = try BSD.sysctl("kern.version", as: String.self)
+    print("Kernel: \(version)")
+
+    // Get OS version
+    let osVersion = try BSD.sysctl("kern.osversion", as: String.self)
+
+    // Get system hostname
+    let hostname = try BSD.sysctl("kern.hostname", as: String.self)
+
+    // Get boot time
+    let bootTime = try BSD.sysctl("kern.boottime", as: timeval.self)
+    ```
+  </Tab>
+  <Tab title="By MIB">
+    ```swift
+    // Use MIB (Management Information Base) array
+    // More efficient for repeated calls
+    let mib: [Int32] = [CTL_KERN, KERN_OSRELEASE]
+    let osRelease = try BSD.sysctl(mib, as: String.self)
+    ```
+  </Tab>
+  <Tab title="As Array">
+    ```swift
+    // Get data as byte array
+    let data = try BSD.sysctl("kern.boottime", asArrayOf: UInt8.self)
+    
+    // Process raw bytes as needed
+    let value = data.withUnsafeBytes { $0.load(as: timeval.self) }
+    ```
+  </Tab>
+</Tabs>
+
+### Writing Kernel State
+
+```swift
+// Set hostname (requires root)
+try BSD.sysctl("kern.hostname", setTo: "new-hostname")
+
+// Set value using MIB
+let mib: [Int32] = [CTL_KERN, KERN_HOSTNAME]
+try BSD.sysctl(mib, setTo: "new-hostname")
+
+// Set using raw byte array
+let newValue: Int32 = 42
+try BSD.sysctl([CTL_KERN, KERN_SOMEVAL], setTo: newValue)
+```
+
+<Warning>
+Many sysctl write operations require root privileges. Attempting to write without proper permissions will throw a permission denied error.
+</Warning>
+
+## Filesystem Operations
+
+### File System Options
+
+BSDCore provides type-safe filesystem operation flags:
+
+```swift
+public struct FSOptions: OptionSet {
+    // Do not follow symbolic links
+    public static let noFollow: Self
+    
+    // Error on symbolic links
+    public static let noFollowWithError: Self
+    
+    // Don't update in-memory cached attributes
+    public static let noInMemoryUpdate: Self
+    
+    // Report full size for sparse files
+    public static let reportFullSize: Self
+    
+    // Return invalid attributes instead of erroring
+    public static let returnInvalidAttributes: Self
+    
+    // Use extended common attributes
+    public static let useExtendedCommonAttributes: Self
+    
+    // Return real device number (not firmlink)
+    public static let returnRealDevice: Self
+    
+    // List snapshot instead of live filesystem
+    public static let listSnapshot: Self
+}
+```
+
+### Using Filesystem Options
+
+```swift
+import BSDCore
+
+// Combine options using OptionSet syntax
+let options: BSD.FSOptions = [
+    .noFollow,
+    .returnRealDevice,
+    .useExtendedCommonAttributes
+]
+
+// Use with filesystem attribute operations
+// (Specific attribute APIs would use these options)
+```
+
+<Accordion title="Symbolic Links and Firmlinks">
+- **noFollow** - Don't traverse symbolic links
+- **noFollowWithError** - Return an error if a symlink is encountered
+- **noFirmlinkPath** - Don't resolve firmlink paths
+- **followFirmlink** - Do follow firmlinks
+
+Firmlinks are a macOS-specific filesystem feature that provides bidirectional symbolic links for system file organization.
+</Accordion>
+
+## Process Information
+
+### The proc_info Syscall
+
+BSDCore wraps the proc_info family of syscalls for querying process information:
+
+```swift
+import BSDCore
+
+public struct ProcInfoCall: OptionSet {
+    public static let listPIDs: Self              // List process IDs
+    public static let pidInfo: Self               // Get process info
+    public static let pidFDInfo: Self             // Get file descriptor info
+    public static let pidFileportInfo: Self       // Get fileport info
+    public static let pidResourceUsage: Self      // Get resource usage
+    public static let terminate: Self             // Terminate process
+    public static let dirtyControl: Self          // Memory pressure control
+    public static let listCoalitions: Self        // List coalitions
+    public static let canUseForegroundHardware: Self  // Check FG hw access
+}
+```
+
+### Getting Kernel Message Buffer
+
+```swift
+import BSDCore
+
+// Retrieve the kernel message buffer (requires root)
+do {
+    let buffer = try BSD.Proc.getKernelMessageBuffer(largeBuffer: true)
+    
+    // Convert to string
+    if let messages = String(data: buffer, encoding: .utf8) {
+        print("Kernel messages:\n\(messages)")
+    }
+} catch {
+    print("Failed to get kernel messages: \(error)")
+}
+```
+
+<Info>
+The kernel message buffer contains kernel log messages (dmesg). macOS typically uses a 128KB buffer, but you can request the smaller 16KB buffer with `largeBuffer: false`.
+</Info>
+
+### Process Info Operations
+
+```swift
+import BSDCore
+
+// General proc_info call pattern
+var buffer = Data(count: expectedSize)
+let returnedBytes = try BSD.Proc.info(
+    forPID: pid,
+    call: .pidInfo,
+    flavor: flavor,
+    arg: argument,
+    buffer: &buffer
+)
+
+// The buffer now contains the requested information
+let info = buffer.withUnsafeBytes { $0.load(as: SomeStruct.self) }
+```
+
+## Task-for-PID
+
+Get a Mach task port for a process ID:
+
+```swift
+import BSDCore
+import MachCore
+
+// Get task port for a PID (requires special entitlement)
+let pid: pid_t = 1234
+let taskPort = try BSD.taskForPID(pid)
+
+// Now you can use Mach operations on this task
+let task = Mach.Task(named: taskPort)
+let threads = try task.threads
+```
+
+<Warning>
+Calling `task_for_pid()` requires the `com.apple.security.cs.debugger` entitlement or running as root. This is a privileged operation.
+</Warning>
+
+## Code Signing (CSops)
+
+Query and manipulate code signing information:
+
+```swift
+import BSDCore
+
+// Code signing operations are available through BSD.CSops
+// This is a low-level interface to the csops() syscall
+
+// Check if a process is platform binary
+// Check code signing status
+// Get code directory hash
+// And more...
+```
+
+<Note>
+The CSops APIs provide access to macOS code signing internals, useful for security research and analysis.
+</Note>
+
+## System Integrity Protection (CSR)
+
+Query System Integrity Protection status:
+
+```swift
+import BSDCore
+
+// BSD.CSR provides access to csr_check() and related functions
+// Query what SIP restrictions are active
+// Check if specific operations are allowed
+```
+
+## Kernel Debug
+
+Interface with the kernel debug subsystem:
+
+```swift
+import BSDCore
+
+// BSD.KernelDebug provides access to kdebug tracing
+// Enable/disable kernel tracing
+// Configure trace buffers
+// Read trace events
+```
+
+## POSIX Spawn
+
+Create new processes with fine-grained control:
+
+```swift
+import BSDCore
+
+// POSIX spawn provides more control than fork/exec
+// Set file actions, attributes, signal masks, etc.
+// Useful for sandboxing and privilege separation
+
+// BSD.POSIXSpawn wraps posix_spawn() family of functions
+```
+
+<Accordion title="POSIX Spawn vs Fork/Exec">
+POSIX spawn combines process creation and execution in a single operation:
+
+- More efficient than fork/exec
+- Better support for setting attributes before execution
+- Required for some sandboxing scenarios
+- Can set file descriptors, working directory, environment
+- Can drop privileges atomically
+</Accordion>
+
+## File Ports
+
+Convert file descriptors to Mach ports:
+
+```swift
+import BSDCore
+import MachCore
+
+// Fileports bridge BSD file descriptors and Mach ports
+// Allows sending file access rights via Mach messages
+
+// BSD.Fileport provides fileport_makeport() wrapper
+let fileDescriptor: Int32 = open("/some/file", O_RDONLY)
+let filePort = try BSD.fileportMakePort(fileDescriptor)
+
+// Now can send this port in a Mach message
+let port = Mach.Port(named: filePort)
+```
+
+<Info>
+Fileports are a macOS-specific feature that allows file access to be transferred between processes via Mach IPC, enabling fine-grained privilege separation.
+</Info>
+
+## KQueue
+
+Event notification mechanism:
+
+```swift
+import BSDCore
+
+// BSD.KQueue wraps kqueue/kevent for event monitoring
+// Monitor file changes, signals, timers, processes
+// More efficient than polling
+```
+
+## Process Listing
+
+Enumerate running processes:
+
+```swift
+import BSDCore
+
+// List all PIDs on the system
+// Get detailed process information
+// Query process relationships (parent/child)
+
+// BSD.Proc.listPIDs wraps proc_listpids()
+```
+
+## Common Patterns
+
+### Privilege Checks
+
+```swift
+import BSDCore
+
+do {
+    // Attempt privileged operation
+    try BSD.sysctl("kern.hostname", setTo: "new-name")
+} catch POSIXError.EPERM {
+    print("Operation requires elevated privileges")
+} catch POSIXError.EACCES {
+    print("Access denied")
+}
+```
+
+### Safe Syscall Wrappers
+
+```swift
+import BSDCore
+
+func safelyReadFile(path: String) throws -> Data {
+    // BSD.call() ensures proper error handling
+    let fd = try BSD.call(open(path, O_RDONLY))
+    defer { close(fd) }  // Always close
+    
+    var stat = stat()
+    try BSD.call(fstat(fd, &stat))
+    
+    var buffer = Data(count: Int(stat.st_size))
+    try buffer.withUnsafeMutableBytes { ptr in
+        try BSD.call(
+            read(fd, ptr.baseAddress, Int(stat.st_size))
+        )
+    }
+    
+    return buffer
+}
+```
+
+### Process Monitoring
+
+```swift
+import BSDCore
+
+// Monitor a process
+func monitorProcess(pid: pid_t) throws {
+    // Get initial resource usage
+    var buffer = Data(count: MemoryLayout<rusage_info_v4>.size)
+    try BSD.Proc.info(
+        forPID: pid,
+        call: .pidResourceUsage,
+        flavor: RUSAGE_INFO_V4,
+        buffer: &buffer
+    )
+    
+    let usage = buffer.withUnsafeBytes {
+        $0.load(as: rusage_info_v4.self)
+    }
+    
+    print("CPU time: \(usage.ri_user_time + usage.ri_system_time)")
+    print("Memory: \(usage.ri_phys_footprint) bytes")
+}
+```
+
+## Platform Differences
+
+<Warning>
+Some BSD features are macOS-specific:
+- Fileports
+- Firmlinks
+- Code signing operations
+- System Integrity Protection
+
+Kass is primarily designed for macOS and may not work on other BSD systems.
+</Warning>
+
+## Summary
+
+<AccordionGroup>
+  <Accordion title="Core BSD Concepts">
+    - Unified error handling via BSD.call()
+    - Sysctl for kernel state queries
+    - proc_info for process information
+    - POSIX spawn for process creation
+    - Fileports for IPC file transfer
+  </Accordion>
+  
+  <Accordion title="Privilege Requirements">
+    Many BSD operations require elevated privileges:
+    - task_for_pid: debugger entitlement or root
+    - Writing sysctls: usually root
+    - Kernel message buffer: root
+    - Code signing operations: varies by operation
+  </Accordion>
+  
+  <Accordion title="Integration with Mach">
+    BSD and Mach are complementary:
+    - task_for_pid: BSD PID → Mach task port
+    - Fileports: BSD FD → Mach port
+    - Process management uses both layers
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Mach Fundamentals" icon="cube" href="/concepts/mach-fundamentals">
+    Understand the Mach layer fundamentals
+  </Card>
+  <Card title="Kernel Interaction" icon="server" href="/concepts/kernel-interaction">
+    Learn safe kernel interaction patterns
+  </Card>
+</CardGroup>

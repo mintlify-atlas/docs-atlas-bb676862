@@ -1,0 +1,378 @@
+---
+title: Messaging API
+description: API reference for Mach messaging, IPC communication, and message passing in the Kass Swift library
+---
+
+# Messaging API
+
+The Messaging API provides Swift-friendly access to Mach messages, which are the foundation of inter-process communication (IPC) in Mach.
+
+## Core Types
+
+### Mach.Message
+
+A message.
+
+```swift
+open class Message
+```
+
+<ResponseField name="header" type="mach_msg_header_t">
+  The message header
+</ResponseField>
+
+<ResponseField name="body" type="Mach.MessageBody?">
+  The message body (optional)
+</ResponseField>
+
+<ResponseField name="payload" type="Data?">
+  The message payload buffer (optional)
+</ResponseField>
+
+<ResponseField name="trailer" type="mach_msg_max_trailer_t?">
+  The message trailer (optional)
+</ResponseField>
+
+#### Initializers
+
+```swift
+public nonisolated required init(
+    descriptors: [any MessageDescriptor]? = nil,
+    payload: Data? = nil
+)
+```
+
+Creates a message with a set of descriptors and a payload.
+
+<ParamField path="descriptors" type="[any MessageDescriptor]?" default="nil">
+  Optional message descriptors
+</ParamField>
+
+<ParamField path="payload" type="Data?" default="nil">
+  Optional payload data
+</ParamField>
+
+---
+
+```swift
+public nonisolated required init(headerPointer: UnsafeMutablePointer<mach_msg_header_t>)
+```
+
+Deserializes an existing message from a header pointer.
+
+#### Methods
+
+```swift
+public func serialize() -> UnsafeMutablePointer<mach_msg_header_t>
+```
+
+Allocates a message buffer, serializes it with the message contents, and returns a header pointer.
+
+**Warning:** Deallocation is the responsibility of the caller.
+
+---
+
+```swift
+public func withUnsafeSerializedMessage<T>(
+    _ body: (UnsafeMutablePointer<mach_msg_header_t>) throws -> T
+) rethrows -> T
+```
+
+Serializes the message and provides a pointer to it in a handler.
+
+## Sending and Receiving Messages
+
+### Static Methods
+
+```swift
+public static func message(
+    _ messageBuffer: UnsafeMutablePointer<mach_msg_header_t>,
+    options: Mach.MessageOptions = [],
+    sendSize: mach_msg_size_t,
+    receiveSize: mach_msg_size_t,
+    receivePort: Mach.Port = Mach.Port.Nil,
+    timeout: mach_msg_timeout_t = MACH_MSG_TIMEOUT_NONE,
+    notifyPort: Mach.Port = Mach.Port.Nil
+) throws
+```
+
+Calls the `mach_msg` kernel call.
+
+---
+
+```swift
+public static func send(
+    _ message: Mach.Message,
+    to remotePort: Mach.Port? = nil,
+    withDisposition remoteDisposition: Mach.PortDisposition? = nil,
+    options: consuming Mach.MessageOptions = [],
+    timeout: mach_msg_timeout_t = MACH_MSG_TIMEOUT_NONE
+) throws
+```
+
+Sends a message.
+
+<ParamField path="message" type="Mach.Message" required>
+  The message to send
+</ParamField>
+
+<ParamField path="remotePort" type="Mach.Port?" default="nil">
+  Override the remote port in the message header
+</ParamField>
+
+<ParamField path="remoteDisposition" type="Mach.PortDisposition?" default="nil">
+  Override the remote port disposition in the message header
+</ParamField>
+
+<ParamField path="options" type="Mach.MessageOptions" default="[]">
+  Message options
+</ParamField>
+
+<ParamField path="timeout" type="mach_msg_timeout_t" default="MACH_MSG_TIMEOUT_NONE">
+  Send timeout
+</ParamField>
+
+**Warning:** The `remotePort` parameter will override the remote port in the message header.
+
+**Warning:** The `remoteDisposition` parameter will override the remote port disposition in the message header.
+
+---
+
+```swift
+public static func send<ReceiveMessage: Mach.Message>(
+    _ message: Mach.Message,
+    to remotePort: Mach.Port? = nil,
+    withDisposition remoteDisposition: Mach.PortDisposition? = nil,
+    receiving receiveType: ReceiveMessage.Type = ReceiveMessage.self,
+    ofMaxSize maxSize: Int = ReceiveMessage.maxReceiveSize,
+    from receivePort: Mach.Port? = nil,
+    withDisposition localDisposition: Mach.PortDisposition? = nil,
+    options: consuming Mach.MessageOptions = [],
+    timeout: mach_msg_timeout_t = MACH_MSG_TIMEOUT_NONE
+) throws -> ReceiveMessage
+```
+
+Sends a message and receives a message.
+
+**Warning:** This function will block until a message is received.
+
+**Warning:** The `remotePort` parameter will override the remote port in the message header.
+
+**Warning:** The `receivePort` parameter will override the local port in the message header.
+
+---
+
+```swift
+public static func receive<ReceiveMessage: Mach.Message>(
+    _ messageType: ReceiveMessage.Type = ReceiveMessage.self,
+    ofMaxSize maxSize: Int = ReceiveMessage.maxReceiveSize,
+    from localPort: Mach.Port,
+    options: consuming Mach.MessageOptions = [],
+    timeout: mach_msg_timeout_t = MACH_MSG_TIMEOUT_NONE
+) throws -> ReceiveMessage
+```
+
+Receives a message.
+
+<ParamField path="messageType" type="ReceiveMessage.Type" default="ReceiveMessage.self">
+  The type of message to receive
+</ParamField>
+
+<ParamField path="maxSize" type="Int" default="ReceiveMessage.maxReceiveSize">
+  Maximum size of the message to receive
+</ParamField>
+
+<ParamField path="localPort" type="Mach.Port" required>
+  The port to receive from
+</ParamField>
+
+<ParamField path="options" type="Mach.MessageOptions" default="[]">
+  Message options
+</ParamField>
+
+<ParamField path="timeout" type="mach_msg_timeout_t" default="MACH_MSG_TIMEOUT_NONE">
+  Receive timeout
+</ParamField>
+
+**Warning:** This function will block until a message is received.
+
+### Static Properties
+
+<ResponseField name="maxReceiveSize" type="Int">
+  The maximum size for receiving messages
+  
+  ```swift
+  public class var maxReceiveSize: Int
+  ```
+</ResponseField>
+
+## Message Options
+
+### Mach.MessageOptions
+
+Options for message operations.
+
+```swift
+public struct MessageOptions: OptionSet
+```
+
+Common options include:
+
+<ParamField path="send" type="MessageOptions">
+  Send the message
+</ParamField>
+
+<ParamField path="receive" type="MessageOptions">
+  Receive a message
+</ParamField>
+
+<ParamField path="sendTimeout" type="MessageOptions">
+  Enable send timeout
+</ParamField>
+
+<ParamField path="receiveTimeout" type="MessageOptions">
+  Enable receive timeout
+</ParamField>
+
+## Message Header
+
+The message header is a `mach_msg_header_t` that contains:
+
+<ResponseField name="msgh_bits" type="mach_msg_bits_t">
+  Message bits including port dispositions
+</ResponseField>
+
+<ResponseField name="msgh_size" type="mach_msg_size_t">
+  Size of the message
+</ResponseField>
+
+<ResponseField name="msgh_remote_port" type="mach_port_t">
+  The remote (destination) port
+</ResponseField>
+
+<ResponseField name="msgh_local_port" type="mach_port_t">
+  The local (reply) port
+</ResponseField>
+
+<ResponseField name="msgh_voucher_port" type="mach_port_name_t">
+  The voucher port
+</ResponseField>
+
+<ResponseField name="msgh_id" type="mach_msg_id_t">
+  Message ID
+</ResponseField>
+
+## Message Body
+
+### Mach.MessageBody
+
+The message body contains descriptors for complex messages.
+
+```swift
+public class MessageBody
+```
+
+Message bodies are used when sending port rights, out-of-line memory, or other complex data in messages.
+
+## Message Descriptors
+
+Message descriptors are used to send complex data types in messages. The available descriptor types depend on what you're sending (ports, memory regions, etc.).
+
+## Usage Example
+
+```swift
+import Mach
+import Foundation
+
+// Create a simple message
+let message = Mach.Message(
+    descriptors: nil,
+    payload: "Hello, Mach!".data(using: .utf8)
+)
+
+// Get a send port (e.g., from bootstrap)
+let task = Mach.Task.current
+let sendPort = try task.getSpecialPort(.bootstrap, as: Mach.Port.self)
+
+// Configure the message header
+message.header.msgh_remote_port = sendPort.name
+message.header.msgh_local_port = MACH_PORT_NULL
+message.header.msgh_bits = mach_msg_bits_t(
+    MACH_MSG_TYPE_COPY_SEND,
+    0,
+    0
+)
+
+// Send the message
+try Mach.Message.send(
+    message,
+    to: sendPort,
+    options: [],
+    timeout: 1000
+)
+
+// Receive a message from a port
+let receivePort = try Mach.Port(named: /* some port name */)  
+let receivedMessage = try Mach.Message.receive(
+    Mach.Message.self,
+    from: receivePort,
+    timeout: 5000
+)
+
+// Access the received data
+if let payload = receivedMessage.payload {
+    let string = String(data: payload, encoding: .utf8)
+    print("Received: \(string ?? "<invalid>"")
+}
+
+// Send and receive in one operation
+let replyMessage = try Mach.Message.send(
+    message,
+    to: sendPort,
+    receiving: Mach.Message.self,
+    from: receivePort,
+    timeout: 5000
+)
+
+// Work with message header
+print("Message size: \(receivedMessage.header.msgh_size)")
+print("Message ID: \(receivedMessage.header.msgh_id)")
+print("Remote port: \(String(format: "0x%x", receivedMessage.header.msgh_remote_port))")
+```
+
+## Advanced Usage
+
+### Serialization
+
+```swift
+// Manually serialize a message
+let message = Mach.Message()
+message.withUnsafeSerializedMessage { headerPointer in
+    // Use the serialized message buffer
+    // Be careful: the buffer is deallocated when the closure returns
+}
+
+// Or get a pointer and manage it yourself
+let headerPointer = message.serialize()
+defer { headerPointer.deallocate() }
+
+// Use the pointer for low-level operations
+try Mach.Message.message(
+    headerPointer,
+    options: [.send],
+    sendSize: mach_msg_size_t(message.header.msgh_size),
+    receiveSize: 0,
+    receivePort: .Nil
+)
+```
+
+### Deserialization
+
+```swift
+// Deserialize from a buffer
+let buffer: UnsafeMutablePointer<mach_msg_header_t> = // ... from somewhere
+let deserializedMessage = Mach.Message(headerPointer: buffer)
+
+// Now you can access all message components
+print("Payload size: \(deserializedMessage.payload?.count ?? 0)")
+```
